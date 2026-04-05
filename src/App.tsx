@@ -1,9 +1,15 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import CanvasEditor, { CanvasEditorHandle } from "./components/CanvasEditor";
 import InspectorPanel from "./components/InspectorPanel";
 import PageSidebar from "./components/PageSidebar";
 import Toolbar from "./components/Toolbar";
 import { getActivePage, useEditorStore } from "./lib/store";
+
+type NoticeEntry = {
+  id: number;
+  text: string;
+  time: string;
+};
 
 export default function App() {
   const project = useEditorStore((state) => state.project);
@@ -14,7 +20,10 @@ export default function App() {
   const deleteSelection = useEditorStore((state) => state.deleteSelection);
 
   const canvasEditorRef = useRef<CanvasEditorHandle | null>(null);
+  const noticeBarRef = useRef<HTMLDivElement | null>(null);
   const activePageNumber = project.pages.findIndex((page) => page.id === project.activePageId) + 1;
+  const [noticeHistory, setNoticeHistory] = useState<NoticeEntry[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const exportPng = useCallback(async () => {
     if (!canvasEditorRef.current) {
@@ -68,6 +77,51 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [deleteSelection, redo, undo]);
 
+  useEffect(() => {
+    if (!notice) {
+      return;
+    }
+
+    const now = new Date();
+    const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(
+      now.getSeconds()
+    ).padStart(2, "0")}`;
+
+    setNoticeHistory((previous) => {
+      const entry: NoticeEntry = {
+        id: now.getTime() + Math.floor(Math.random() * 1000),
+        text: notice,
+        time
+      };
+      return [entry, ...previous].slice(0, 60);
+    });
+  }, [notice]);
+
+  useEffect(() => {
+    if (!historyOpen) {
+      return;
+    }
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (!noticeBarRef.current?.contains(event.target as Node)) {
+        setHistoryOpen(false);
+      }
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setHistoryOpen(false);
+      }
+    };
+
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [historyOpen]);
+
   return (
     <div className="app-shell">
       <main className="mx-auto flex h-[calc(100vh-28px)] max-w-[1920px] min-w-0 flex-col gap-3 text-[var(--text-primary)]">
@@ -95,12 +149,36 @@ export default function App() {
             </span>
           </div>
 
-          <div className="min-h-[28px] justify-self-center">
-            {notice ? (
-              <span className="rounded-lg border border-cyan-300/35 bg-cyan-500/14 px-3 py-1.5 text-xs text-cyan-100">
-                {notice}
-              </span>
-            ) : null}
+          <div className="justify-self-center" ref={noticeBarRef}>
+            <div className="relative">
+              {historyOpen ? (
+                <div className="studio-surface absolute bottom-full left-0 right-0 z-30 mb-2 max-h-56 overflow-auto p-2">
+                  <div className="mb-1 px-1 text-[11px] uppercase tracking-[0.14em] text-[var(--text-secondary)]">消息历史</div>
+                  {noticeHistory.length === 0 ? (
+                    <p className="px-1 py-1 text-xs text-[var(--text-secondary)]">暂无消息</p>
+                  ) : (
+                    <ul className="space-y-1.5">
+                      {noticeHistory.map((entry) => (
+                        <li key={entry.id} className="studio-subtle rounded-lg px-2 py-1.5 text-left">
+                          <p className="text-xs text-[var(--text-primary)]">{entry.text}</p>
+                          <p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">{entry.time}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ) : null}
+
+              <button
+                type="button"
+                className="studio-subtle flex h-[30px] w-[280px] items-center justify-between gap-2 rounded-lg px-3 text-left sm:w-[360px] lg:w-[440px]"
+                onClick={() => setHistoryOpen((open) => !open)}
+                title={notice ?? "暂无消息"}
+              >
+                <span className="truncate text-xs text-cyan-100">{notice ?? "准备就绪"}</span>
+                <span className="text-[10px] text-[var(--text-secondary)]">{historyOpen ? "收起" : "历史"}</span>
+              </button>
+            </div>
           </div>
 
           <div className="flex min-w-0 flex-wrap items-center gap-2 justify-self-end">
