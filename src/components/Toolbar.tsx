@@ -162,12 +162,16 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
           <button
             type="button"
             aria-label="切换黑暗模式"
-            aria-pressed={themeMode === "dark"}
-            className={`${compactButtonClass} ${themeMode === "dark" ? "studio-btn-primary" : ""}`}
+            role="switch"
+            aria-checked={themeMode === "dark"}
+            className="theme-switch"
+            data-mode={themeMode}
             onClick={() => toggleThemeMode()}
             title={themeMode === "dark" ? "切换为明亮模式" : "切换为黑暗模式"}
           >
-            {themeMode === "dark" ? "黑暗模式" : "明亮模式"}
+            <span className="theme-switch__thumb" aria-hidden="true" />
+            <span className="theme-switch__option theme-switch__option--light">亮</span>
+            <span className="theme-switch__option theme-switch__option--dark">暗</span>
           </button>
         </div>
       </div>

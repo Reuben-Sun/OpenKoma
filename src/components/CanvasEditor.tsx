@@ -30,6 +30,10 @@ function triggerDownload(dataUrl: string, filename: string) {
   anchor.click();
 }
 
+function clampZoom(value: number) {
+  return Math.min(1, Math.max(0.1, value));
+}
+
 function snapSize(value: number, minValue: number, step = 16) {
   const minMultiple = Math.ceil(minValue / step) * step;
   const snapped = Math.round(value / step) * step;
@@ -417,38 +421,12 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
     setDraftStart(null);
   };
 
+  const adjustZoom = (delta: number) => {
+    setZoom((current) => clampZoom(current + delta));
+  };
+
   return (
     <div className="studio-surface relative h-full w-full overflow-auto">
-      <div className="sticky left-0 top-0 z-10 flex w-full flex-wrap items-center gap-3 border-b border-[var(--line-soft)] bg-[rgba(12,18,28,0.9)] px-4 py-2.5 backdrop-blur">
-        <span className="studio-chip px-2.5 py-1 text-[11px] font-semibold text-[var(--text-primary)]">
-          画布 {activePage.canvas.width} x {activePage.canvas.height}
-        </span>
-        <span
-          className={`studio-chip px-2.5 py-1 text-[11px] ${
-            manualPanelMode ? "border-cyan-300/60 text-cyan-100" : "text-[var(--text-secondary)]"
-          }`}
-        >
-          手绘分镜 {manualPanelMode ? "ON" : "OFF"}
-        </span>
-        <span
-          className={`studio-chip px-2.5 py-1 text-[11px] ${
-            snapSizeTo16 ? "border-emerald-300/60 text-emerald-100" : "text-[var(--text-secondary)]"
-          }`}
-        >
-          16 倍数吸附 {snapSizeTo16 ? "ON" : "OFF"}
-        </span>
-        <label className="ml-auto text-xs text-[var(--text-secondary)]">缩放 {Math.round(zoom * 100)}%</label>
-        <input
-          type="range"
-          min={0.1}
-          max={1}
-          step={0.01}
-          value={zoom}
-          onChange={(event) => setZoom(Number(event.target.value))}
-          className="w-44 accent-[var(--accent)]"
-        />
-      </div>
-
       <div className="studio-workspace min-w-fit p-6 lg:p-8">
         <div
           className="relative overflow-hidden rounded-xl border border-slate-300/90 bg-slate-100 shadow-[0_28px_70px_rgba(2,6,23,0.4)]"
@@ -634,6 +612,39 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
               />
             </Layer>
           </Stage>
+        </div>
+      </div>
+
+      <div className="pointer-events-none absolute right-3 top-3 z-20">
+        <div className="studio-subtle pointer-events-auto flex items-center gap-2 rounded-xl px-2.5 py-2">
+          <button
+            type="button"
+            className="studio-btn h-7 w-7 px-0 text-sm leading-none"
+            onClick={() => adjustZoom(-0.05)}
+            title="缩小"
+            aria-label="缩小"
+          >
+            -
+          </button>
+          <label className="text-[11px] text-[var(--text-secondary)]">缩放 {Math.round(zoom * 100)}%</label>
+          <input
+            type="range"
+            min={0.1}
+            max={1}
+            step={0.01}
+            value={zoom}
+            onChange={(event) => setZoom(clampZoom(Number(event.target.value)))}
+            className="w-28 accent-[var(--accent)]"
+          />
+          <button
+            type="button"
+            className="studio-btn h-7 w-7 px-0 text-sm leading-none"
+            onClick={() => adjustZoom(0.05)}
+            title="放大"
+            aria-label="放大"
+          >
+            +
+          </button>
         </div>
       </div>
     </div>
