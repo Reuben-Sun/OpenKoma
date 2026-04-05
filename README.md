@@ -62,22 +62,6 @@ OpenKoma is a local-first comic creation environment designed for practical prod
   - Bottom fixed message bar with expandable history records
   - Light/dark mode switch via Radix Themes
 
-## Method Overview
-```mermaid
-flowchart LR
-    A[Toolbar / Inspector / Canvas] --> B[Zustand Store]
-    B --> C[Patch Builder (forward + backward)]
-    C --> D[historyPast / historyFuture]
-    B --> E[Project Document]
-    E --> F[project.json]
-    E --> G[history.log]
-    B --> H[Image Assets]
-    H --> I[project/images or temp/images]
-    E --> J[Exporter]
-    J --> K[PNG current page]
-    J --> L[PDF pages in order]
-```
-
 ## Quick Start
 ### Requirements
 - Node.js 18+
