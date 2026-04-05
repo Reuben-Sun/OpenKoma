@@ -26,6 +26,7 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
   const setProjectName = useEditorStore((state) => state.setProjectName);
   const setCanvasPreset = useEditorStore((state) => state.setCanvasPreset);
   const setCanvasSize = useEditorStore((state) => state.setCanvasSize);
+  const setAllPanelsStyle = useEditorStore((state) => state.setAllPanelsStyle);
   const splitGrid = useEditorStore((state) => state.splitGrid);
   const splitSelectedPanel = useEditorStore((state) => state.splitSelectedPanel);
   const toggleManualPanelMode = useEditorStore((state) => state.toggleManualPanelMode);
@@ -40,11 +41,24 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
   const [gridCols, setGridCols] = useState(2);
   const [splitRows, setSplitRows] = useState(2);
   const [splitCols, setSplitCols] = useState(1);
+  const [allRounded, setAllRounded] = useState(true);
+  const [allRadius, setAllRadius] = useState(14);
+  const [allBorderWidth, setAllBorderWidth] = useState(4);
 
   useEffect(() => {
     setCanvasWidth(project.canvas.width);
     setCanvasHeight(project.canvas.height);
   }, [project.canvas.height, project.canvas.width]);
+
+  useEffect(() => {
+    const sample = project.panels[0];
+    if (!sample) {
+      return;
+    }
+    setAllRounded(sample.borderRadius > 0);
+    setAllRadius(sample.borderRadius || 14);
+    setAllBorderWidth(sample.borderWidth);
+  }, [project.panels]);
 
   const applyCanvasSize = (event: FormEvent) => {
     event.preventDefault();
@@ -144,6 +158,41 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
         />
         <button className={buttonClass} onClick={() => splitSelectedPanel(splitRows, splitCols)}>
           Split
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-slate-400">全部分镜样式</span>
+        <label className="flex items-center gap-2 text-sm text-slate-200">
+          <input type="checkbox" checked={allRounded} onChange={(event) => setAllRounded(event.target.checked)} />
+          圆角
+        </label>
+        <input
+          className={`${inputClass} w-20`}
+          type="number"
+          min={0}
+          value={allRadius}
+          disabled={!allRounded}
+          onChange={(event) => setAllRadius(Math.max(0, Number(event.target.value)))}
+        />
+        <span className="text-slate-400">边框</span>
+        <input
+          className={`${inputClass} w-20`}
+          type="number"
+          min={0}
+          value={allBorderWidth}
+          onChange={(event) => setAllBorderWidth(Math.max(0, Number(event.target.value)))}
+        />
+        <button
+          className={buttonClass}
+          onClick={() =>
+            setAllPanelsStyle({
+              borderRadius: allRounded ? allRadius : 0,
+              borderWidth: allBorderWidth
+            })
+          }
+        >
+          应用到全部分镜
         </button>
       </div>
 

@@ -25,6 +25,23 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function pickExtension(filename, mimeType) {
+  const extFromName = path.extname(String(filename || "")).toLowerCase();
+  if (extFromName) {
+    return extFromName;
+  }
+
+  const table = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "image/svg+xml": ".svg"
+  };
+  return table[String(mimeType || "").toLowerCase()] || ".png";
+}
+
 function createPlaceholderSvg(prompt, width, height) {
   const safePrompt = prompt.replace(/[<&>]/g, "").slice(0, 90) || "OpenKoma";
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
@@ -147,6 +164,37 @@ app.post("/api/generate", async (request, response) => {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "生成失败";
+    response.status(500).json({ error: message });
+  }
+});
+
+app.post("/api/images/upload", async (request, response) => {
+  try {
+    const base64 = String(request.body?.base64 || "");
+    const filename = String(request.body?.filename || "");
+    const mimeType = String(request.body?.mimeType || "");
+    if (!base64) {
+      response.status(400).json({ error: "base64 不能为空" });
+      return;
+    }
+
+    const pureBase64 = base64.includes(",") ? base64.split(",")[1] : base64;
+    const buffer = Buffer.from(pureBase64, "base64");
+    if (!buffer.length) {
+      response.status(400).json({ error: "base64 内容无效" });
+      return;
+    }
+
+    const ext = pickExtension(filename, mimeType);
+    const savedName = `${Date.now()}_${uuidv4()}${ext}`;
+    const absolutePath = path.join(imageDir, savedName);
+    await fs.writeFile(absolutePath, buffer);
+
+    response.json({
+      url: `/assets/images/${savedName}`
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "上传失败";
     response.status(500).json({ error: message });
   }
 });

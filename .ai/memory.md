@@ -81,3 +81,19 @@
   - `undo` 应用 backward patch，`redo` 应用 forward patch
 - 无实际变更时不再写入历史（避免空操作污染历史）
 - 历史上限仍为 `80`，行为保持一致
+
+## 2026-04-05 - 全局分镜样式 + 本地图像导入裁剪
+
+- `Toolbar` 新增“全部分镜样式”：
+  - 一键设置所有分镜是否圆角（圆角开关 + 半径）
+  - 一键设置所有分镜边框粗细
+- `store` 新增动作：
+  - `setAllPanelsStyle({ borderRadius, borderWidth })`
+  - `uploadLocalImageForPanel(id, file)`
+- 新增本地图像上传链路：
+  - 前端 `uploadLocalImage(file)` -> `POST /api/images/upload`
+  - 服务端将原图写入 `project/images/*` 并返回 `/assets/images/...`
+- `Inspector` 新增：
+  - 选中分镜后可“导入本地图片”
+  - “打开手动裁剪”弹窗：可拖拽框选保留区域
+  - 保持非破坏流程：原图路径仍保存在 `panel.image.original`，只修改 `panel.image.crop`

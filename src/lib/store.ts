@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { v4 as uuidv4 } from "uuid";
 import { applyPatch, compare, type Operation } from "fast-json-patch";
-import { generateImage, loadProject as loadProjectApi, saveProject as saveProjectApi } from "./api";
+import { generateImage, loadProject as loadProjectApi, saveProject as saveProjectApi, uploadLocalImage } from "./api";
 import { clamp, createBubble as createBubbleFactory, createEmptyProject, createPanel, splitGridPanels } from "./project";
 import { Bubble, BubbleType, CanvasPreset, CropConfig, Panel, Project, Selection } from "../types";
 
@@ -18,6 +18,7 @@ type EditorStore = {
   historyFuture: HistoryEntry[];
   busy: {
     generatingPanelId?: string;
+    uploadingPanelId?: string;
     loadingProject: boolean;
     savingProject: boolean;
   };
@@ -31,6 +32,7 @@ type EditorStore = {
   setProjectName: (name: string) => void;
   setCanvasPreset: (preset: CanvasPreset) => void;
   setCanvasSize: (width: number, height: number) => void;
+  setAllPanelsStyle: (style: { borderRadius?: number; borderWidth?: number }) => void;
 
   splitGrid: (rows: number, cols: number) => void;
   splitSelectedPanel: (rows: number, cols: number) => void;
@@ -50,6 +52,7 @@ type EditorStore = {
 
   setPanelCrop: (id: string, crop: CropConfig) => void;
   resetPanelCrop: (id: string) => void;
+  uploadLocalImageForPanel: (id: string, file: File) => Promise<void>;
 
   generateImageForPanel: (id: string) => Promise<void>;
 
@@ -133,6 +136,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   historyFuture: [],
   busy: {
     generatingPanelId: undefined,
+    uploadingPanelId: undefined,
     loadingProject: false,
     savingProject: false
   },
@@ -256,6 +260,41 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
       return {
         ...historyState
+      };
+    });
+  },
+
+  setAllPanelsStyle: (style) => {
+    set((state) => {
+      if (state.project.panels.length === 0) {
+        return {
+          notice: "当前没有分镜"
+        };
+      }
+
+      const nextPanels = state.project.panels.map((panel) =>
+        sanitizePanel({
+          ...panel,
+          borderRadius: style.borderRadius === undefined ? panel.borderRadius : style.borderRadius,
+          borderWidth: style.borderWidth === undefined ? panel.borderWidth : style.borderWidth
+        })
+      );
+
+      const nextProject: Project = {
+        ...state.project,
+        panels: nextPanels
+      };
+
+      const historyState = withHistory(state, nextProject);
+      if (!historyState) {
+        return {
+          notice: "所有分镜样式未变化"
+        };
+      }
+
+      return {
+        ...historyState,
+        notice: "已应用到全部分镜"
       };
     });
   },
@@ -617,6 +656,71 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         ...historyState
       };
     });
+  },
+
+  uploadLocalImageForPanel: async (id, file) => {
+    const panel = findPanel(get().project, id);
+    if (!panel) {
+      set({ notice: "找不到分镜" });
+      return;
+    }
+
+    set((state) => ({
+      busy: {
+        ...state.busy,
+        uploadingPanelId: id
+      },
+      notice: "正在导入本地图像..."
+    }));
+
+    try {
+      const result = await uploadLocalImage(file);
+      set((state) => {
+        if (!state.project.panels.some((entry) => entry.id === id)) {
+          return {
+            notice: "分镜已不存在"
+          };
+        }
+
+        const nextProject: Project = {
+          ...state.project,
+          panels: state.project.panels.map((entry) => {
+            if (entry.id !== id) {
+              return entry;
+            }
+            return {
+              ...entry,
+              image: {
+                original: result.url,
+                naturalWidth: result.naturalWidth,
+                naturalHeight: result.naturalHeight,
+                crop: undefined
+              }
+            };
+          })
+        };
+
+        const historyState = withHistory(state, nextProject);
+        if (!historyState) {
+          return state;
+        }
+
+        return {
+          ...historyState,
+          notice: "本地图像导入完成"
+        };
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "导入失败";
+      set({ notice: message });
+    } finally {
+      set((state) => ({
+        busy: {
+          ...state.busy,
+          uploadingPanelId: undefined
+        }
+      }));
+    }
   },
 
   generateImageForPanel: async (id) => {

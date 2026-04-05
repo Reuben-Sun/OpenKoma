@@ -1,4 +1,4 @@
-import { ChangeEvent } from "react";
+import { ChangeEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Bubble, CropConfig, Panel } from "../types";
 import { useEditorStore } from "../lib/store";
 
@@ -13,6 +13,38 @@ const textareaClass =
   "w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none ring-blue-500 focus:ring";
 const buttonClass =
   "rounded-lg border border-slate-500 bg-slate-800 px-3 py-1.5 text-sm text-slate-100 transition hover:border-blue-400 hover:bg-slate-700";
+
+type CropDraft = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+function clamp(value: number, min: number, max: number): number {
+  if (Number.isNaN(value)) {
+    return min;
+  }
+  return Math.min(max, Math.max(min, value));
+}
+
+function createCropFromPoints(
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  naturalWidth: number,
+  naturalHeight: number
+): CropDraft {
+  const x = clamp(Math.min(start.x, end.x), 0, naturalWidth);
+  const y = clamp(Math.min(start.y, end.y), 0, naturalHeight);
+  const right = clamp(Math.max(start.x, end.x), 0, naturalWidth);
+  const bottom = clamp(Math.max(start.y, end.y), 0, naturalHeight);
+  return {
+    x,
+    y,
+    width: Math.max(1, right - x),
+    height: Math.max(1, bottom - y)
+  };
+}
 
 function NumberField({
   label,
@@ -54,6 +86,188 @@ function TextField({ label, value, onChange }: { label: string; value: string; o
   );
 }
 
+function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean; onClose: () => void }) {
+  const setPanelCrop = useEditorStore((state) => state.setPanelCrop);
+  const resetPanelCrop = useEditorStore((state) => state.resetPanelCrop);
+
+  const naturalWidth = panel.image?.naturalWidth ?? panel.width;
+  const naturalHeight = panel.image?.naturalHeight ?? panel.height;
+  const initialCrop: CropDraft = useMemo(
+    () =>
+      panel.image?.crop
+        ? {
+            x: panel.image.crop.x,
+            y: panel.image.crop.y,
+            width: panel.image.crop.width,
+            height: panel.image.crop.height
+          }
+        : {
+            x: 0,
+            y: 0,
+            width: naturalWidth,
+            height: naturalHeight
+          },
+    [naturalHeight, naturalWidth, panel.image?.crop]
+  );
+
+  const [draft, setDraft] = useState<CropDraft>(initialCrop);
+  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    setDraft(initialCrop);
+    setDragStart(null);
+  }, [initialCrop, open]);
+
+  if (!open || !panel.image?.original) {
+    return null;
+  }
+
+  const scale = Math.min(1, 920 / naturalWidth, 560 / naturalHeight);
+  const displayWidth = Math.max(1, Math.round(naturalWidth * scale));
+  const displayHeight = Math.max(1, Math.round(naturalHeight * scale));
+
+  const toNaturalPoint = (event: PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = clamp((event.clientX - rect.left) / scale, 0, naturalWidth);
+    const y = clamp((event.clientY - rect.top) / scale, 0, naturalHeight);
+    return { x, y };
+  };
+
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    const point = toNaturalPoint(event);
+    setDragStart(point);
+    setDraft({ x: point.x, y: point.y, width: 1, height: 1 });
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    if (!dragStart) {
+      return;
+    }
+
+    const point = toNaturalPoint(event);
+    setDraft(createCropFromPoints(dragStart, point, naturalWidth, naturalHeight));
+  };
+
+  const onPointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    if (!dragStart) {
+      return;
+    }
+
+    const point = toNaturalPoint(event);
+    setDraft(createCropFromPoints(dragStart, point, naturalWidth, naturalHeight));
+    setDragStart(null);
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const applyCrop = () => {
+    setPanelCrop(panel.id, {
+      x: draft.x,
+      y: draft.y,
+      width: draft.width,
+      height: draft.height,
+      scale: panel.image?.crop?.scale ?? 1
+    });
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
+      <div className="w-full max-w-6xl rounded-2xl border border-slate-700 bg-ink-900 p-4 shadow-panel">
+        <div className="flex items-center justify-between gap-3">
+          <h4 className="text-base font-semibold">图像手动裁剪</h4>
+          <button className={buttonClass} onClick={onClose}>
+            关闭
+          </button>
+        </div>
+
+        <p className="mt-2 text-xs text-slate-400">拖拽框选要保留的区域。原图会保留在本地，分镜只显示裁剪结果。</p>
+
+        <div
+          className="relative mx-auto mt-4 overflow-hidden rounded-lg border border-slate-700 bg-slate-950"
+          style={{ width: displayWidth, height: displayHeight }}
+        >
+          <img
+            src={panel.image.original}
+            alt="crop-source"
+            className="block select-none"
+            draggable={false}
+            style={{ width: displayWidth, height: displayHeight }}
+          />
+
+          <div
+            className="absolute inset-0 cursor-crosshair"
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+          >
+            <div
+              className="absolute border-2 border-blue-400 bg-blue-500/20"
+              style={{
+                left: draft.x * scale,
+                top: draft.y * scale,
+                width: Math.max(1, draft.width * scale),
+                height: Math.max(1, draft.height * scale)
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-slate-300">
+          <span>
+            X: {Math.round(draft.x)} Y: {Math.round(draft.y)} W: {Math.round(draft.width)} H: {Math.round(draft.height)}
+          </span>
+          <span className="text-slate-500">|</span>
+          <span>
+            原图: {naturalWidth} x {naturalHeight}
+          </span>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <button className={buttonClass} onClick={() => setDraft(initialCrop)}>
+            回到当前裁剪
+          </button>
+          <button
+            className={buttonClass}
+            onClick={() =>
+              setDraft({
+                x: 0,
+                y: 0,
+                width: naturalWidth,
+                height: naturalHeight
+              })
+            }
+          >
+            选择整图
+          </button>
+          <button
+            className={buttonClass}
+            onClick={() => {
+              resetPanelCrop(panel.id);
+              onClose();
+            }}
+          >
+            清除裁剪
+          </button>
+          <button className={`${buttonClass} border-blue-500`} onClick={applyCrop}>
+            应用裁剪
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CropEditor({ panel }: { panel: Panel }) {
   const setPanelCrop = useEditorStore((state) => state.setPanelCrop);
   const resetPanelCrop = useEditorStore((state) => state.resetPanelCrop);
@@ -81,7 +295,7 @@ function CropEditor({ panel }: { panel: Panel }) {
 
   return (
     <div className={sectionClass}>
-      <h4 className="text-sm font-semibold text-slate-200">图像裁剪（非破坏）</h4>
+      <h4 className="text-sm font-semibold text-slate-200">精细裁剪参数（非破坏）</h4>
       <p className="text-xs text-slate-400">
         原图尺寸: {naturalWidth} x {naturalHeight}
       </p>
@@ -114,12 +328,31 @@ function CropEditor({ panel }: { panel: Panel }) {
 function PanelInspector({ panel }: { panel: Panel }) {
   const updatePanel = useEditorStore((state) => state.updatePanel);
   const generateImageForPanel = useEditorStore((state) => state.generateImageForPanel);
+  const uploadLocalImageForPanel = useEditorStore((state) => state.uploadLocalImageForPanel);
   const generatingPanelId = useEditorStore((state) => state.busy.generatingPanelId);
+  const uploadingPanelId = useEditorStore((state) => state.busy.uploadingPanelId);
+
+  const [cropModalOpen, setCropModalOpen] = useState(false);
+  const localImageInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setCropModalOpen(false);
+  }, [panel.id]);
 
   const patch = (key: keyof Panel) => (value: string | number) => {
     updatePanel(panel.id, {
       [key]: value
     } as Partial<Panel>);
+  };
+
+  const onLocalImageSelected = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    void uploadLocalImageForPanel(panel.id, file);
+    event.target.value = "";
   };
 
   return (
@@ -143,6 +376,42 @@ function PanelInspector({ panel }: { panel: Panel }) {
             onChange={(event) => patch("borderColor")(event.target.value)}
           />
         </label>
+      </div>
+
+      <div className={sectionClass}>
+        <h3 className="text-sm font-semibold">图像来源</h3>
+
+        <input
+          ref={localImageInputRef}
+          className="hidden"
+          type="file"
+          accept="image/*"
+          onChange={onLocalImageSelected}
+        />
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            className={buttonClass}
+            disabled={uploadingPanelId === panel.id}
+            onClick={() => localImageInputRef.current?.click()}
+          >
+            {uploadingPanelId === panel.id ? "导入中..." : "导入本地图片"}
+          </button>
+
+          {panel.image?.original ? (
+            <button className={buttonClass} onClick={() => setCropModalOpen(true)}>
+              打开手动裁剪
+            </button>
+          ) : null}
+        </div>
+
+        {panel.image?.original ? (
+          <p className="text-xs text-slate-400">
+            当前图像尺寸: {panel.image.naturalWidth ?? "?"} x {panel.image.naturalHeight ?? "?"}
+          </p>
+        ) : (
+          <p className="text-xs text-slate-400">未导入本地图像时，可继续使用 AI 生成。</p>
+        )}
       </div>
 
       <div className={sectionClass}>
@@ -179,6 +448,8 @@ function PanelInspector({ panel }: { panel: Panel }) {
       </div>
 
       <CropEditor panel={panel} />
+
+      <VisualCropModal panel={panel} open={cropModalOpen} onClose={() => setCropModalOpen(false)} />
     </div>
   );
 }
