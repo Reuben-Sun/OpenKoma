@@ -1,11 +1,13 @@
 import { FormEvent, useEffect, useState } from "react";
 import { getActivePage, useEditorStore } from "../lib/store";
 
-const inputClass =
-  "rounded-lg border border-slate-600 bg-ink-800 px-3 py-1 text-sm text-slate-100 outline-none ring-blue-500 transition focus:ring";
-
-const buttonClass =
-  "rounded-lg border border-slate-500 bg-slate-800 px-3 py-1.5 text-sm text-slate-100 transition hover:border-blue-400 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50";
+const inputClass = "studio-input h-9 px-3 text-sm";
+const selectClass = "studio-select h-9 px-3 text-sm";
+const buttonClass = "studio-btn px-3 py-1.5 text-sm";
+const primaryButtonClass = `${buttonClass} studio-btn-primary`;
+const dangerButtonClass = `${buttonClass} studio-btn-danger`;
+const groupClass = "studio-subtle space-y-2 rounded-2xl p-3";
+const groupTitleClass = "text-[11px] uppercase tracking-[0.16em] text-[var(--text-secondary)]";
 
 type ToolbarProps = {
   onExportPng: () => Promise<void>;
@@ -69,163 +71,23 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
   };
 
   return (
-    <header className="space-y-3 rounded-2xl border border-slate-700 bg-ink-900 p-3 shadow-panel">
+    <header className="studio-surface space-y-3 p-4">
       <div className="flex flex-wrap items-center gap-2">
+        <span className="studio-chip px-3 py-1 text-[11px] uppercase tracking-[0.14em]">OpenKoma Studio</span>
         <input
-          className={`${inputClass} min-w-56 flex-1`}
+          className={`${inputClass} min-w-[220px] flex-1 px-3 text-base font-semibold`}
           value={project.name}
           onChange={(event) => setProjectName(event.target.value)}
           placeholder="项目名称"
         />
-
-        <select
-          className={inputClass}
-          value={activePage.canvas.preset ?? "custom"}
-          onChange={(event) => setCanvasPreset(event.target.value as "A4" | "A3" | "custom")}
-        >
-          <option value="A4">A4</option>
-          <option value="A3">A3</option>
-          <option value="custom">Custom</option>
-        </select>
-
-        <form className="flex items-center gap-2" onSubmit={applyCanvasSize}>
-          <input
-            className={`${inputClass} w-24`}
-            type="number"
-            value={canvasWidth}
-            onChange={(event) => setCanvasWidth(Number(event.target.value))}
-          />
-          <span className="text-slate-400">x</span>
-          <input
-            className={`${inputClass} w-24`}
-            type="number"
-            value={canvasHeight}
-            onChange={(event) => setCanvasHeight(Number(event.target.value))}
-          />
-          <button type="submit" className={buttonClass}>
-            应用画布
-          </button>
-        </form>
-
         <button className={buttonClass} disabled={historyPastCount === 0} onClick={() => undo()}>
           撤销
         </button>
         <button className={buttonClass} disabled={historyFutureCount === 0} onClick={() => redo()}>
           重做
         </button>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-slate-400">网格切割</span>
-        <input
-          className={`${inputClass} w-16`}
-          type="number"
-          min={1}
-          value={gridRows}
-          onChange={(event) => setGridRows(Number(event.target.value))}
-        />
-        <span className="text-slate-400">x</span>
-        <input
-          className={`${inputClass} w-16`}
-          type="number"
-          min={1}
-          value={gridCols}
-          onChange={(event) => setGridCols(Number(event.target.value))}
-        />
-        <button className={buttonClass} onClick={() => splitGrid(gridRows, gridCols)}>
-          切割画布
-        </button>
-
-        <button
-          className={`${buttonClass} ${manualPanelMode ? "border-blue-400 bg-blue-500/30" : ""}`}
-          onClick={() => toggleManualPanelMode()}
-        >
-          手绘分镜
-        </button>
-
-        <button
-          className={`${buttonClass} ${snapSizeTo16 ? "border-emerald-400 bg-emerald-500/30" : ""}`}
-          onClick={() => toggleSnapSizeTo16()}
-        >
-          16 倍数尺寸
-        </button>
-
-        <span className="ml-4 text-xs text-slate-400">选中分镜二次切割</span>
-        <input
-          className={`${inputClass} w-16`}
-          type="number"
-          min={1}
-          value={splitRows}
-          onChange={(event) => setSplitRows(Number(event.target.value))}
-        />
-        <span className="text-slate-400">x</span>
-        <input
-          className={`${inputClass} w-16`}
-          type="number"
-          min={1}
-          value={splitCols}
-          onChange={(event) => setSplitCols(Number(event.target.value))}
-        />
-        <button className={buttonClass} onClick={() => splitSelectedPanel(splitRows, splitCols)}>
-          Split
-        </button>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-slate-400">全部分镜样式</span>
-        <label className="flex items-center gap-2 text-sm text-slate-200">
-          <input type="checkbox" checked={allRounded} onChange={(event) => setAllRounded(event.target.checked)} />
-          圆角
-        </label>
-        <input
-          className={`${inputClass} w-20`}
-          type="number"
-          min={0}
-          value={allRadius}
-          disabled={!allRounded}
-          onChange={(event) => setAllRadius(Math.max(0, Number(event.target.value)))}
-        />
-        <span className="text-slate-400">边框</span>
-        <input
-          className={`${inputClass} w-20`}
-          type="number"
-          min={0}
-          value={allBorderWidth}
-          onChange={(event) => setAllBorderWidth(Math.max(0, Number(event.target.value)))}
-        />
         <button
           className={buttonClass}
-          onClick={() =>
-            setAllPanelsStyle({
-              borderRadius: allRounded ? allRadius : 0,
-              borderWidth: allBorderWidth
-            })
-          }
-        >
-          应用到全部分镜
-        </button>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <button className={buttonClass} onClick={() => addBubble("rect")}>
-          新建矩形气泡
-        </button>
-        <button className={buttonClass} onClick={() => addBubble("rounded")}>
-          新建圆角气泡
-        </button>
-        <button className={buttonClass} onClick={() => addBubble("circle")}>
-          新建圆形气泡
-        </button>
-
-        <button className={`${buttonClass} ml-4`} onClick={() => void onExportPng()}>
-          导出 PNG
-        </button>
-        <button className={buttonClass} onClick={() => void onExportPdf()}>
-          导出 PDF
-        </button>
-
-        <button
-          className={`${buttonClass} ml-4`}
           disabled={busy.savingProject}
           onClick={() => {
             void saveProject();
@@ -242,17 +104,169 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
         >
           {busy.loadingProject ? "加载中..." : "加载项目"}
         </button>
-
-        <button
-          className={`${buttonClass} border-rose-500 hover:border-rose-400`}
-          disabled={!selection}
-          onClick={() => deleteSelection()}
-        >
-          删除选中对象
-        </button>
       </div>
 
-      {notice ? <p className="text-sm text-blue-200">{notice}</p> : null}
+      <div className="grid gap-3 2xl:grid-cols-4 xl:grid-cols-2">
+        <section className={groupClass}>
+          <p className={groupTitleClass}>画布设置</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              className={`${selectClass} min-w-[96px]`}
+              value={activePage.canvas.preset ?? "custom"}
+              onChange={(event) => setCanvasPreset(event.target.value as "A4" | "A3" | "custom")}
+            >
+              <option value="A4">A4</option>
+              <option value="A3">A3</option>
+              <option value="custom">Custom</option>
+            </select>
+            <form className="flex items-center gap-2" onSubmit={applyCanvasSize}>
+              <input
+                className={`${inputClass} w-24 px-2`}
+                type="number"
+                value={canvasWidth}
+                onChange={(event) => setCanvasWidth(Number(event.target.value))}
+              />
+              <span className="text-[var(--text-secondary)]">x</span>
+              <input
+                className={`${inputClass} w-24 px-2`}
+                type="number"
+                value={canvasHeight}
+                onChange={(event) => setCanvasHeight(Number(event.target.value))}
+              />
+              <button type="submit" className={primaryButtonClass}>
+                应用画布
+              </button>
+            </form>
+          </div>
+        </section>
+
+        <section className={groupClass}>
+          <p className={groupTitleClass}>分镜布局</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-[var(--text-secondary)]">网格切割</span>
+            <input
+              className={`${inputClass} w-16 px-2`}
+              type="number"
+              min={1}
+              value={gridRows}
+              onChange={(event) => setGridRows(Number(event.target.value))}
+            />
+            <span className="text-[var(--text-secondary)]">x</span>
+            <input
+              className={`${inputClass} w-16 px-2`}
+              type="number"
+              min={1}
+              value={gridCols}
+              onChange={(event) => setGridCols(Number(event.target.value))}
+            />
+            <button className={buttonClass} onClick={() => splitGrid(gridRows, gridCols)}>
+              切割画布
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className={`${buttonClass} ${manualPanelMode ? "border-cyan-300/70 bg-cyan-500/25" : ""}`}
+              onClick={() => toggleManualPanelMode()}
+            >
+              手绘分镜
+            </button>
+            <button
+              className={`${buttonClass} ${snapSizeTo16 ? "border-emerald-300/70 bg-emerald-500/25" : ""}`}
+              onClick={() => toggleSnapSizeTo16()}
+            >
+              16 倍数尺寸
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-[var(--text-secondary)]">选中分镜二次切割</span>
+            <input
+              className={`${inputClass} w-16 px-2`}
+              type="number"
+              min={1}
+              value={splitRows}
+              onChange={(event) => setSplitRows(Number(event.target.value))}
+            />
+            <span className="text-[var(--text-secondary)]">x</span>
+            <input
+              className={`${inputClass} w-16 px-2`}
+              type="number"
+              min={1}
+              value={splitCols}
+              onChange={(event) => setSplitCols(Number(event.target.value))}
+            />
+            <button className={buttonClass} onClick={() => splitSelectedPanel(splitRows, splitCols)}>
+              应用
+            </button>
+          </div>
+        </section>
+
+        <section className={groupClass}>
+          <p className={groupTitleClass}>批量样式</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
+              <input type="checkbox" checked={allRounded} onChange={(event) => setAllRounded(event.target.checked)} />
+              圆角
+            </label>
+            <input
+              className={`${inputClass} w-20 px-2`}
+              type="number"
+              min={0}
+              value={allRadius}
+              disabled={!allRounded}
+              onChange={(event) => setAllRadius(Math.max(0, Number(event.target.value)))}
+            />
+            <span className="text-xs text-[var(--text-secondary)]">边框</span>
+            <input
+              className={`${inputClass} w-20 px-2`}
+              type="number"
+              min={0}
+              value={allBorderWidth}
+              onChange={(event) => setAllBorderWidth(Math.max(0, Number(event.target.value)))}
+            />
+            <button
+              className={primaryButtonClass}
+              onClick={() =>
+                setAllPanelsStyle({
+                  borderRadius: allRounded ? allRadius : 0,
+                  borderWidth: allBorderWidth
+                })
+              }
+            >
+              应用到全部分镜
+            </button>
+          </div>
+        </section>
+
+        <section className={groupClass}>
+          <p className={groupTitleClass}>对象、导出与文件</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button className={buttonClass} onClick={() => addBubble("rect")}>
+              新建矩形气泡
+            </button>
+            <button className={buttonClass} onClick={() => addBubble("rounded")}>
+              新建圆角气泡
+            </button>
+            <button className={buttonClass} onClick={() => addBubble("circle")}>
+              新建圆形气泡
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button className={primaryButtonClass} onClick={() => void onExportPng()}>
+              导出 PNG
+            </button>
+            <button className={primaryButtonClass} onClick={() => void onExportPdf()}>
+              导出 PDF
+            </button>
+            <button className={dangerButtonClass} disabled={!selection} onClick={() => deleteSelection()}>
+              删除选中对象
+            </button>
+          </div>
+        </section>
+      </div>
+
+      {notice ? (
+        <p className="studio-subtle rounded-xl px-3 py-2 text-sm text-cyan-100/95">{notice}</p>
+      ) : null}
     </header>
   );
 }

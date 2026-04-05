@@ -379,9 +379,26 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
   };
 
   return (
-    <div className="relative h-full w-full overflow-auto rounded-2xl border border-slate-700 bg-ink-900 shadow-panel">
-      <div className="sticky left-0 top-0 z-10 flex w-full items-center gap-3 border-b border-slate-800 bg-ink-900/95 px-4 py-2 backdrop-blur">
-        <label className="text-xs text-slate-400">缩放 {Math.round(zoom * 100)}%</label>
+    <div className="studio-surface relative h-full w-full overflow-auto">
+      <div className="sticky left-0 top-0 z-10 flex w-full flex-wrap items-center gap-3 border-b border-[var(--line-soft)] bg-[rgba(12,18,28,0.9)] px-4 py-2.5 backdrop-blur">
+        <span className="studio-chip px-2.5 py-1 text-[11px] font-semibold text-[var(--text-primary)]">
+          画布 {activePage.canvas.width} x {activePage.canvas.height}
+        </span>
+        <span
+          className={`studio-chip px-2.5 py-1 text-[11px] ${
+            manualPanelMode ? "border-cyan-300/60 text-cyan-100" : "text-[var(--text-secondary)]"
+          }`}
+        >
+          手绘分镜 {manualPanelMode ? "ON" : "OFF"}
+        </span>
+        <span
+          className={`studio-chip px-2.5 py-1 text-[11px] ${
+            snapSizeTo16 ? "border-emerald-300/60 text-emerald-100" : "text-[var(--text-secondary)]"
+          }`}
+        >
+          16 倍数吸附 {snapSizeTo16 ? "ON" : "OFF"}
+        </span>
+        <label className="ml-auto text-xs text-[var(--text-secondary)]">缩放 {Math.round(zoom * 100)}%</label>
         <input
           type="range"
           min={0.1}
@@ -389,13 +406,13 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
           step={0.01}
           value={zoom}
           onChange={(event) => setZoom(Number(event.target.value))}
-          className="w-44"
+          className="w-44 accent-[var(--accent)]"
         />
       </div>
 
-      <div className="min-w-fit p-6">
+      <div className="studio-workspace min-w-fit p-6 lg:p-8">
         <div
-          className="relative"
+          className="relative overflow-hidden rounded-xl border border-slate-300/90 bg-slate-100 shadow-[0_28px_70px_rgba(2,6,23,0.4)]"
           style={{
             width: Math.ceil(activePage.canvas.width * zoom),
             height: Math.ceil(activePage.canvas.height * zoom)

@@ -3,16 +3,17 @@ import { Bubble, CropConfig, Panel } from "../types";
 import { getActivePage, useEditorStore } from "../lib/store";
 
 const containerClass =
-  "h-full overflow-auto rounded-2xl border border-slate-700 bg-ink-900 p-4 text-slate-100 shadow-panel";
-const sectionClass = "space-y-3 rounded-xl border border-slate-700 bg-ink-800 p-3";
+  "studio-surface h-full overflow-auto p-4 text-[var(--text-primary)]";
+const sectionClass = "studio-subtle space-y-3 rounded-2xl p-3.5";
 const fieldClass = "flex items-center justify-between gap-3";
-const labelClass = "text-xs uppercase tracking-wide text-slate-400";
-const inputClass =
-  "w-full rounded-lg border border-slate-600 bg-slate-900 px-2 py-1 text-sm text-slate-100 outline-none ring-blue-500 focus:ring";
-const textareaClass =
-  "w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none ring-blue-500 focus:ring";
-const buttonClass =
-  "rounded-lg border border-slate-500 bg-slate-800 px-3 py-1.5 text-sm text-slate-100 transition hover:border-blue-400 hover:bg-slate-700";
+const labelClass = "text-[11px] uppercase tracking-[0.15em] text-[var(--text-secondary)]";
+const inputClass = "studio-input h-9 w-full px-3 text-sm";
+const selectClass = "studio-select h-9 w-full px-3 text-sm";
+const textareaClass = "studio-textarea w-full px-3 py-2 text-sm";
+const buttonClass = "studio-btn px-3 py-1.5 text-sm";
+const primaryButtonClass = `${buttonClass} studio-btn-primary`;
+const dangerButtonClass = `${buttonClass} studio-btn-danger`;
+const colorInputClass = "h-9 w-20 cursor-pointer rounded-lg border border-[var(--line-soft)] bg-transparent";
 
 type CropDraft = {
   x: number;
@@ -236,9 +237,9 @@ function cropHandleClass(edge: ResizeEdge) {
 
 function cropHandleGuideClass(edge: ResizeEdge) {
   if (edge === "left" || edge === "right") {
-    return "mx-auto h-full w-0.5 bg-blue-300/90";
+    return "mx-auto h-full w-0.5 bg-cyan-200/90";
   }
-  return "my-auto h-0.5 w-full bg-blue-300/90";
+  return "my-auto h-0.5 w-full bg-cyan-200/90";
 }
 
 function CropEdgeHandle({
@@ -464,21 +465,24 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
-      <div className="w-full max-w-6xl rounded-2xl border border-slate-700 bg-ink-900 p-4 shadow-panel">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(2,8,14,0.82)] p-4 backdrop-blur-sm">
+      <div className="studio-surface w-full max-w-6xl p-4 md:p-5">
         <div className="flex items-center justify-between gap-3">
-          <h4 className="text-base font-semibold">图像手动裁剪</h4>
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">Crop Editor</p>
+            <h4 className="text-base font-semibold text-[var(--text-primary)]">图像手动裁剪</h4>
+          </div>
           <button className={buttonClass} onClick={onClose}>
             关闭
           </button>
         </div>
 
-        <p className="mt-2 text-xs text-slate-400">
+        <p className="mt-2 text-xs text-[var(--text-secondary)]">
           拖动框内可移动裁剪区域，拖动四条边可缩放。裁剪框比例固定为分镜比例 {frameRatioText}，原图会保留在本地。
         </p>
 
         <div
-          className="relative mx-auto mt-4 overflow-hidden rounded-lg border border-slate-700 bg-slate-950"
+          className="relative mx-auto mt-4 overflow-hidden rounded-xl border border-[var(--line-soft)] bg-slate-950 shadow-[0_16px_46px_rgba(2,6,23,0.55)]"
           style={{ width: displayWidth, height: displayHeight }}
         >
           <img
@@ -497,7 +501,7 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
             onPointerCancel={onOverlayPointerCancel}
           >
             <div
-              className="absolute border-2 border-blue-400 bg-blue-500/20"
+              className="absolute border-2 border-cyan-300 bg-cyan-400/20"
               style={createScaledStyle(draft, scale)}
               onPointerDown={startMove}
             >
@@ -509,11 +513,11 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-slate-300">
+        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-[var(--text-primary)]">
           <span>
             X: {Math.round(draft.x)} Y: {Math.round(draft.y)} W: {Math.round(draft.width)} H: {Math.round(draft.height)}
           </span>
-          <span className="text-slate-500">|</span>
+          <span className="text-[var(--text-secondary)]">|</span>
           <span>
             原图: {naturalWidth} x {naturalHeight}
           </span>
@@ -530,7 +534,7 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
             匹配比例最大区域
           </button>
           <button
-            className={buttonClass}
+            className={dangerButtonClass}
             onClick={() => {
               resetPanelCrop(panel.id);
               onClose();
@@ -538,7 +542,7 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
           >
             清除裁剪
           </button>
-          <button className={`${buttonClass} border-blue-500`} onClick={applyCrop}>
+          <button className={primaryButtonClass} onClick={applyCrop}>
             应用裁剪
           </button>
         </div>
@@ -574,8 +578,8 @@ function CropEditor({ panel }: { panel: Panel }) {
 
   return (
     <div className={sectionClass}>
-      <h4 className="text-sm font-semibold text-slate-200">精细裁剪参数（非破坏）</h4>
-      <p className="text-xs text-slate-400">
+      <h4 className="text-sm font-semibold text-[var(--text-primary)]">精细裁剪参数（非破坏）</h4>
+      <p className="text-xs text-[var(--text-secondary)]">
         原图尺寸: {naturalWidth} x {naturalHeight}
       </p>
 
@@ -637,7 +641,10 @@ function PanelInspector({ panel }: { panel: Panel }) {
   return (
     <div className="space-y-3">
       <div className={sectionClass}>
-        <h3 className="text-sm font-semibold">分镜属性</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">分镜属性</h3>
+          <span className="studio-chip px-2.5 py-1 text-[11px]">Panel</span>
+        </div>
         <NumberField label="X" value={panel.x} onChange={patch("x") as (v: number) => void} />
         <NumberField label="Y" value={panel.y} onChange={patch("y") as (v: number) => void} />
         <NumberField label="Width" value={panel.width} min={24} onChange={patch("width") as (v: number) => void} />
@@ -649,7 +656,7 @@ function PanelInspector({ panel }: { panel: Panel }) {
         <label className={fieldClass}>
           <span className={labelClass}>BorderColor</span>
           <input
-            className="h-9 w-20 rounded border border-slate-600 bg-transparent"
+            className={colorInputClass}
             type="color"
             value={panel.borderColor}
             onChange={(event) => patch("borderColor")(event.target.value)}
@@ -658,7 +665,10 @@ function PanelInspector({ panel }: { panel: Panel }) {
       </div>
 
       <div className={sectionClass}>
-        <h3 className="text-sm font-semibold">图像来源</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">图像来源</h3>
+          <span className="studio-chip px-2.5 py-1 text-[11px]">Image</span>
+        </div>
 
         <input
           ref={localImageInputRef}
@@ -670,7 +680,7 @@ function PanelInspector({ panel }: { panel: Panel }) {
 
         <div className="flex flex-wrap items-center gap-2">
           <button
-            className={buttonClass}
+            className={primaryButtonClass}
             disabled={uploadingPanelId === panel.id}
             onClick={() => localImageInputRef.current?.click()}
           >
@@ -685,16 +695,19 @@ function PanelInspector({ panel }: { panel: Panel }) {
         </div>
 
         {panel.image?.original ? (
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-[var(--text-secondary)]">
             当前图像尺寸: {panel.image.naturalWidth ?? "?"} x {panel.image.naturalHeight ?? "?"}
           </p>
         ) : (
-          <p className="text-xs text-slate-400">未导入本地图像时，可继续使用 AI 生成。</p>
+          <p className="text-xs text-[var(--text-secondary)]">未导入本地图像时，可继续使用 AI 生成。</p>
         )}
       </div>
 
       <div className={sectionClass}>
-        <h3 className="text-sm font-semibold">AI 生成</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">AI 生成</h3>
+          <span className="studio-chip px-2.5 py-1 text-[11px]">Prompt</span>
+        </div>
         <label className="space-y-1">
           <span className={labelClass}>Prompt</span>
           <textarea
@@ -716,7 +729,7 @@ function PanelInspector({ panel }: { panel: Panel }) {
         </label>
 
         <button
-          className={buttonClass}
+          className={primaryButtonClass}
           disabled={generatingPanelId === panel.id}
           onClick={() => {
             void generateImageForPanel(panel.id);
@@ -745,11 +758,14 @@ function BubbleInspector({ bubble }: { bubble: Bubble }) {
   return (
     <div className="space-y-3">
       <div className={sectionClass}>
-        <h3 className="text-sm font-semibold">气泡属性</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">气泡属性</h3>
+          <span className="studio-chip px-2.5 py-1 text-[11px]">Bubble</span>
+        </div>
         <label className={fieldClass}>
           <span className={labelClass}>Type</span>
           <select
-            className={`${inputClass} max-w-40`}
+            className={`${selectClass} max-w-40`}
             value={bubble.type}
             onChange={(event) => patch("type")(event.target.value)}
           >
@@ -762,7 +778,7 @@ function BubbleInspector({ bubble }: { bubble: Bubble }) {
         <label className={fieldClass}>
           <span className={labelClass}>Direction</span>
           <select
-            className={`${inputClass} max-w-40`}
+            className={`${selectClass} max-w-40`}
             value={bubble.direction}
             onChange={(event) => patch("direction")(event.target.value)}
           >
@@ -782,7 +798,7 @@ function BubbleInspector({ bubble }: { bubble: Bubble }) {
         <label className={fieldClass}>
           <span className={labelClass}>Background</span>
           <input
-            className="h-9 w-20 rounded border border-slate-600 bg-transparent"
+            className={colorInputClass}
             type="color"
             value={bubble.background}
             onChange={(event) => patch("background")(event.target.value)}
@@ -792,7 +808,7 @@ function BubbleInspector({ bubble }: { bubble: Bubble }) {
         <label className={fieldClass}>
           <span className={labelClass}>Border</span>
           <input
-            className="h-9 w-20 rounded border border-slate-600 bg-transparent"
+            className={colorInputClass}
             type="color"
             value={bubble.borderColor}
             onChange={(event) => patch("borderColor")(event.target.value)}
@@ -826,9 +842,16 @@ export default function InspectorPanel() {
 
   return (
     <aside className={containerClass}>
-      <h2 className="mb-4 text-lg font-semibold">Inspector</h2>
+      <div className="mb-4">
+        <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">Inspector</p>
+        <h2 className="text-lg font-semibold text-[var(--text-primary)]">属性检查器</h2>
+      </div>
 
-      {!selection && <p className="text-sm text-slate-400">请选择一个分镜或气泡进行编辑。</p>}
+      {!selection && (
+        <p className="studio-subtle rounded-xl px-3 py-2 text-sm text-[var(--text-secondary)]">
+          请选择一个分镜或气泡进行编辑。
+        </p>
+      )}
 
       {selectedPanel && <PanelInspector panel={selectedPanel} />}
       {selectedBubble && <BubbleInspector bubble={selectedBubble} />}

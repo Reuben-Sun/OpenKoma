@@ -13,6 +13,7 @@ export default function App() {
   const deleteSelection = useEditorStore((state) => state.deleteSelection);
 
   const canvasEditorRef = useRef<CanvasEditorHandle | null>(null);
+  const activePageNumber = project.pages.findIndex((page) => page.id === project.activePageId) + 1;
 
   const exportPng = useCallback(async () => {
     if (!canvasEditorRef.current) {
@@ -67,32 +68,37 @@ export default function App() {
   }, [deleteSelection, redo, undo]);
 
   return (
-    <main className="flex h-screen flex-col gap-3 p-3 text-slate-100">
-      <Toolbar onExportPng={exportPng} onExportPdf={exportPdf} />
+    <div className="app-shell">
+      <main className="mx-auto flex h-[calc(100vh-28px)] max-w-[1920px] min-w-0 flex-col gap-3 text-[var(--text-primary)]">
+        <Toolbar onExportPng={exportPng} onExportPdf={exportPdf} />
 
-      <section className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-12">
-        <div className="min-h-0 lg:col-span-2">
-          <PageSidebar />
-        </div>
+        <section className="grid min-h-0 flex-1 grid-cols-1 gap-3 xl:grid-cols-[274px_minmax(740px,1fr)_400px]">
+          <div className="min-h-0">
+            <PageSidebar />
+          </div>
 
-        <div className="min-h-0 lg:col-span-6">
-          <CanvasEditor ref={canvasEditorRef} />
-        </div>
+          <div className="min-h-0">
+            <CanvasEditor ref={canvasEditorRef} />
+          </div>
 
-        <div className="min-h-0 lg:col-span-4">
-          <InspectorPanel />
-        </div>
-      </section>
+          <div className="min-h-0">
+            <InspectorPanel />
+          </div>
+        </section>
 
-      <footer className="flex items-center justify-between rounded-xl border border-slate-700 bg-ink-900 px-4 py-2 text-xs text-slate-400">
-        <span>
-          Page {project.pages.findIndex((page) => page.id === project.activePageId) + 1} / {project.pages.length} ·
-          Canvas {activePage.canvas.width} x {activePage.canvas.height}
-        </span>
-        <span>
-          Panels: {activePage.panels.length} | Bubbles: {activePage.bubbles.length}
-        </span>
-      </footer>
-    </main>
+        <footer className="studio-surface flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-xs text-[var(--text-secondary)]">
+          <div className="flex items-center gap-2">
+            <span className="studio-chip px-2.5 py-1">Page {activePageNumber} / {project.pages.length}</span>
+            <span className="studio-chip px-2.5 py-1">
+              Canvas {activePage.canvas.width} x {activePage.canvas.height}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="studio-chip px-2.5 py-1">Panels {activePage.panels.length}</span>
+            <span className="studio-chip px-2.5 py-1">Bubbles {activePage.bubbles.length}</span>
+          </div>
+        </footer>
+      </main>
+    </div>
   );
 }

@@ -5,7 +5,8 @@ import { Bubble, Panel, ProjectPage } from "../types";
 import { useEditorStore } from "../lib/store";
 
 const buttonClass =
-  "rounded-lg border border-slate-500 bg-slate-800 px-2 py-1 text-xs text-slate-100 transition hover:border-blue-400 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40";
+  "studio-btn h-8 px-2.5 text-xs tracking-[0.01em] disabled:cursor-not-allowed disabled:opacity-40";
+const dangerButtonClass = `${buttonClass} studio-btn-danger`;
 
 function toVerticalText(text: string) {
   return text
@@ -102,7 +103,7 @@ function PageMiniPreview({ page }: { page: ProjectPage }) {
 
   return (
     <div
-      className="overflow-hidden rounded-md border border-slate-400 bg-slate-100 shadow-inner"
+      className="overflow-hidden rounded-lg border border-slate-300/90 bg-slate-100 shadow-[0_8px_22px_rgba(2,6,23,0.24)]"
       style={{ width: preview.width, height: preview.height }}
     >
       <Stage
@@ -163,15 +164,18 @@ export default function PageSidebar() {
   const movePage = useEditorStore((state) => state.movePage);
 
   return (
-    <aside className="flex h-full min-h-0 flex-col rounded-2xl border border-slate-700 bg-ink-900 shadow-panel">
-      <div className="flex items-center justify-between border-b border-slate-800 px-3 py-2">
-        <h3 className="text-sm font-semibold text-slate-100">页面</h3>
-        <button className={buttonClass} onClick={() => addPage()}>
+    <aside className="studio-surface flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="flex items-center justify-between border-b border-[var(--line-soft)] px-3.5 py-3">
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">Storyboard</p>
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">页面胶片栏</h3>
+        </div>
+        <button className={`${buttonClass} studio-btn-primary`} onClick={() => addPage()}>
           + 新增
         </button>
       </div>
 
-      <div className="space-y-2 overflow-auto p-2">
+      <div className="space-y-2.5 overflow-auto p-2.5">
         {project.pages.map((page, index) => {
           const isActive = project.activePageId === page.id;
           const canMoveUp = index > 0;
@@ -181,26 +185,30 @@ export default function PageSidebar() {
           return (
             <div
               key={page.id}
-              className={`rounded-xl border p-2 transition ${
-                isActive ? "border-blue-400 bg-blue-500/15" : "border-slate-700 bg-ink-800 hover:border-slate-500"
+              className={`rounded-2xl border p-2.5 transition ${
+                isActive
+                  ? "border-[var(--accent)] bg-[var(--accent-soft)] shadow-[0_12px_26px_rgba(2,42,56,0.35)]"
+                  : "border-[var(--line-soft)] bg-[rgba(12,18,28,0.72)] hover:border-[var(--line-strong)]"
               }`}
             >
               <button
-                className="w-full space-y-2 text-left"
+                className="w-full space-y-2.5 rounded-xl p-1 text-left"
                 onClick={() => setActivePage(page.id)}
                 type="button"
                 title={page.name}
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-slate-100">P{index + 1}</span>
-                  <span className="text-[11px] text-slate-400">
+                  <span className="studio-chip px-2.5 py-1 text-[11px] font-semibold text-[var(--text-primary)]">
+                    P{index + 1}
+                  </span>
+                  <span className="text-[11px] text-[var(--text-secondary)]">
                     {page.canvas.width}x{page.canvas.height}
                   </span>
                 </div>
                 <div className="flex justify-center">
                   <PageMiniPreview page={page} />
                 </div>
-                <div className="text-[11px] text-slate-400">
+                <div className="text-[11px] text-[var(--text-secondary)]">
                   分镜 {page.panels.length} · 气泡 {page.bubbles.length}
                 </div>
               </button>
@@ -223,7 +231,7 @@ export default function PageSidebar() {
                   下移
                 </button>
                 <button
-                  className={`${buttonClass} border-rose-600/70 hover:border-rose-400`}
+                  className={dangerButtonClass}
                   disabled={!canDelete}
                   onClick={() => deletePage(page.id)}
                   type="button"

@@ -177,3 +177,25 @@
   - 预览使用 `Stage + Layer` 按画布比例缩放，确保编辑后可见内容及时同步
 - 验证：
   - `npm run build` 通过
+
+## 2026-04-05 - 专业漫画编辑器风格重构（UI）
+
+- 全局视觉系统升级：
+  - `src/index.css` 建立统一主题变量（背景、面板、线条、文字、强调色）
+  - 新增 `studio-*` 通用样式类（surface/input/select/textarea/button/chip/workspace）
+  - 页面背景改为多层渐变 + 细网格纹理，滚动条与交互过渡统一
+- 主框架与顶部工具区：
+  - `src/App.tsx` 主布局改为专业编辑器三栏结构（页面栏/画布区/检查器）
+  - `src/components/Toolbar.tsx` 改为分组控制台样式，保留原有功能逻辑
+- 本轮补齐的三块区域：
+  - `src/components/PageSidebar.tsx`：
+    - 页面栏改为“胶片卡片”视觉，活动页高亮、信息层级更明确
+    - 缩略图容器强化边框与阴影，页操作按钮统一到 `studio-btn`
+  - `src/components/CanvasEditor.tsx`：
+    - 画布区改为“工作台”风格，顶部状态芯片展示画布尺寸/手绘模式/16倍数吸附
+    - 缩放条、画布承载层和阴影统一视觉，不改拖拽/缩放/导出逻辑
+  - `src/components/InspectorPanel.tsx`：
+    - 分镜/气泡/裁剪模块统一为卡片分区，控件切换到 `studio-*` 样式
+    - 裁剪弹窗升级为编辑器化视觉，按钮层级（主操作/危险操作）明确
+- 验证：
+  - `npm run build` 通过
