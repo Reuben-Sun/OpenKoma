@@ -38,11 +38,11 @@ Unlike many demo-grade tools, OpenKoma persists both structure (`project.json`) 
 ```mermaid
 flowchart LR
     A[Toolbar / Inspector / Canvas] --> B[Zustand Store]
-    B --> C[Patch Builder\nforward + backward]
+    B --> C["Patch Builder (forward + backward)"]
     C --> D[historyPast / historyFuture]
     B --> E[Project Document]
-    E --> F[project.json\n(layout)]
-    E --> G[history.log\n(messages + patches)]
+    E --> F["project.json (layout)"]
+    E --> G["history.log (messages + patches)"]
     B --> H[Image Assets]
     H --> I[project/images or temp/images]
     E --> J[Exporter]

@@ -623,3 +623,15 @@
     - 附带版权声明：`Copyright 2026 OpenKoma Authors`
 - 验证：
   - `npm run build` 通过
+
+## 2026-04-05 - 修复 README Mermaid 渲染报错（增量）
+
+- 问题：
+  - GitHub rich display 渲染 `README.md` 的 Mermaid 图时抛出 parse error
+  - 报错点位于带 `\\n` 的节点标签（如 `project.json\\n(layout)`）
+- 修复：
+  - `README.md` 的 Mermaid 节点文案改为引号包裹的单行文本：
+    - `Patch Builder (forward + backward)`
+    - `project.json (layout)`
+    - `history.log (messages + patches)`
+  - 移除 `\\n` 形式换行，避免 GitHub Mermaid 解析歧义
