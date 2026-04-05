@@ -32,8 +32,8 @@ export function createCanvasFromPreset(preset: CanvasPreset = "A4"): CanvasConfi
 const DEFAULT_PANEL_STYLE: Pick<Panel, "borderColor" | "borderRadius" | "borderWidth" | "gap"> = {
   borderWidth: 4,
   borderColor: "#111827",
-  borderRadius: 14,
-  gap: 12
+  borderRadius: 0,
+  gap: 0
 };
 
 export function createPanel(input: Pick<Panel, "x" | "y" | "width" | "height"> & Partial<Panel>): Panel {
@@ -141,7 +141,7 @@ export function splitGridPanels(
           y: margin + r * (cellHeight + gap),
           width: cellWidth,
           height: cellHeight,
-          gap: 10
+          gap: 0
         })
       );
     }

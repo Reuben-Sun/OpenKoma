@@ -59,8 +59,8 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
   const [gridCols, setGridCols] = useState(2);
   const [splitRows, setSplitRows] = useState(2);
   const [splitCols, setSplitCols] = useState(1);
-  const [allRounded, setAllRounded] = useState(true);
-  const [allRadius, setAllRadius] = useState(14);
+  const [allRounded, setAllRounded] = useState(false);
+  const [allRadius, setAllRadius] = useState(0);
   const [allBorderWidth, setAllBorderWidth] = useState(4);
   const [activeCategory, setActiveCategory] = useState<ToolCategory | null>(null);
 
@@ -75,7 +75,7 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
       return;
     }
     setAllRounded(sample.borderRadius > 0);
-    setAllRadius(sample.borderRadius || 14);
+    setAllRadius(sample.borderRadius);
     setAllBorderWidth(sample.borderWidth);
   }, [activePage.panels]);
 

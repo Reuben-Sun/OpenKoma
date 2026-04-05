@@ -367,10 +367,11 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
       return;
     }
 
-    const targetName = event.target?.name?.();
-    const isCanvasBackground = event.target === stage || targetName === "canvas-bg";
-
-    if (!isCanvasBackground) {
+    const target = event.target;
+    const onPanel = Boolean(target?.findAncestor?.(".panel-node", true));
+    const onBubble = Boolean(target?.findAncestor?.(".bubble-node", true));
+    const onTransformer = Boolean(target?.findAncestor?.(".selection-transformer", true));
+    if (onPanel || onBubble || onTransformer) {
       return;
     }
 
@@ -476,6 +477,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
                   <Group
                     key={panel.id}
                     id={`panel-${panel.id}`}
+                    name="panel-node"
                     x={panel.x}
                     y={panel.y}
                     width={panel.width}
@@ -543,6 +545,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
                   <Group
                     key={bubble.id}
                     id={`bubble-${bubble.id}`}
+                    name="bubble-node"
                     x={bubble.x}
                     y={bubble.y}
                     width={bubble.width}
@@ -606,6 +609,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
 
               <Transformer
                 ref={transformerRef}
+                name="selection-transformer"
                 rotateEnabled={false}
                 flipEnabled={false}
                 borderStroke="#2563eb"

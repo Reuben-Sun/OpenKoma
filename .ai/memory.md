@@ -320,3 +320,24 @@
   - 边框不再被图片覆盖，边缘显示更稳定
 - 验证：
   - `npm run build` 通过
+
+## 2026-04-05 - 默认分镜 gap/radius 置零 + 点击空白取消选中
+
+- 需求：
+  - 默认 `gap` 与 `radius` 为 0
+  - 选中分镜后点击画布空白区域（不属于任何框）应取消选中
+- 实现：
+  - `src/lib/project.ts`
+    - `DEFAULT_PANEL_STYLE` 调整为：`borderRadius: 0`、`gap: 0`
+    - 网格分割创建的新分镜默认 `gap` 从 `10` 改为 `0`
+  - `src/components/Toolbar.tsx`
+    - 批量样式初始状态改为 `allRounded=false`、`allRadius=0`
+    - 页面样本同步时不再把 `0` 半径回退成 `14`
+  - `src/components/CanvasEditor.tsx`
+    - 空白点击判定改为“只要不是分镜/气泡/Transformer 控件就视为空白”
+    - 点击空白时：
+      - 手绘模式下开始框选
+      - 非手绘模式下执行 `clearSelection()`
+    - 为分镜、气泡、Transformer 增加 name 标记，确保命中判定稳定
+- 验证：
+  - `npm run build` 通过
