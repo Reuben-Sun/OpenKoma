@@ -69,13 +69,28 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
     setAllBorderWidth(sample.borderWidth);
   }, [activePage.panels]);
 
+  useEffect(() => {
+    if (!expanded) {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setExpanded(false);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [expanded]);
+
   const applyCanvasSize = (event: FormEvent) => {
     event.preventDefault();
     setCanvasSize(canvasWidth, canvasHeight);
   };
 
   return (
-    <header className="studio-surface relative p-2.5">
+    <header className="studio-surface relative z-20 p-2.5">
       <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-0.5">
         <span className="studio-chip px-3 py-1 text-[11px] uppercase tracking-[0.14em]">OpenKoma Studio</span>
         <input
@@ -120,8 +135,15 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
       </div>
 
       {expanded ? (
-        <div className="absolute right-0 top-[calc(100%+10px)] z-40 w-[340px] max-w-[92vw]">
-          <div className="studio-surface max-h-[calc(100vh-160px)] space-y-3 overflow-auto p-3">
+        <>
+          <button
+            className="fixed inset-0 z-40 bg-[rgba(2,8,14,0.36)] backdrop-blur-[1px]"
+            type="button"
+            aria-label="关闭工具抽屉"
+            onClick={() => setExpanded(false)}
+          />
+
+          <aside className="studio-surface fixed right-3 top-[84px] z-50 w-[340px] max-w-[92vw] max-h-[calc(100vh-96px)] overflow-auto p-3">
             <div className="flex items-center justify-between">
               <span className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">工具抽屉</span>
               <button className={compactButtonClass} onClick={() => setExpanded(false)}>
@@ -284,8 +306,8 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
                 </button>
               </div>
             </section>
-          </div>
-        </div>
+          </aside>
+        </>
       ) : null}
 
       {notice ? (
