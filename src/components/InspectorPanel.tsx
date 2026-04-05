@@ -28,21 +28,101 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function createCropFromPoints(
-  start: { x: number; y: number },
-  end: { x: number; y: number },
+function createCenteredCropWithRatio(naturalWidth: number, naturalHeight: number, ratio: number): CropDraft {
+  const safeRatio = Math.max(0.001, ratio);
+  if (naturalWidth / naturalHeight >= safeRatio) {
+    const height = naturalHeight;
+    const width = height * safeRatio;
+    return {
+      x: (naturalWidth - width) / 2,
+      y: 0,
+      width,
+      height
+    };
+  }
+
+  const width = naturalWidth;
+  const height = width / safeRatio;
+  return {
+    x: 0,
+    y: (naturalHeight - height) / 2,
+    width,
+    height
+  };
+}
+
+function normalizeCropToRatio(
+  crop: CropDraft,
   naturalWidth: number,
-  naturalHeight: number
+  naturalHeight: number,
+  ratio: number
 ): CropDraft {
-  const x = clamp(Math.min(start.x, end.x), 0, naturalWidth);
-  const y = clamp(Math.min(start.y, end.y), 0, naturalHeight);
-  const right = clamp(Math.max(start.x, end.x), 0, naturalWidth);
-  const bottom = clamp(Math.max(start.y, end.y), 0, naturalHeight);
+  const safeRatio = Math.max(0.001, ratio);
+  let width = Math.max(1, crop.width);
+  let height = Math.max(1, crop.height);
+  const centerX = crop.x + width / 2;
+  const centerY = crop.y + height / 2;
+
+  if (width / height >= safeRatio) {
+    height = width / safeRatio;
+  } else {
+    width = height * safeRatio;
+  }
+
+  const fitScale = Math.min(1, naturalWidth / width, naturalHeight / height);
+  width = Math.max(1, width * fitScale);
+  height = Math.max(1, height * fitScale);
+
+  const x = clamp(centerX - width / 2, 0, naturalWidth - width);
+  const y = clamp(centerY - height / 2, 0, naturalHeight - height);
   return {
     x,
     y,
-    width: Math.max(1, right - x),
-    height: Math.max(1, bottom - y)
+    width,
+    height
+  };
+}
+
+function createCropFromPointsWithRatio(
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  naturalWidth: number,
+  naturalHeight: number,
+  ratio: number
+): CropDraft {
+  const safeRatio = Math.max(0.001, ratio);
+  const directionX = end.x >= start.x ? 1 : -1;
+  const directionY = end.y >= start.y ? 1 : -1;
+  const maxWidth = directionX > 0 ? naturalWidth - start.x : start.x;
+  const maxHeight = directionY > 0 ? naturalHeight - start.y : start.y;
+
+  let width = Math.abs(end.x - start.x);
+  let height = Math.abs(end.y - start.y);
+
+  if (width < 1 && height < 1) {
+    width = safeRatio >= 1 ? safeRatio : 1;
+    height = safeRatio >= 1 ? 1 : 1 / safeRatio;
+  } else if (width / Math.max(height, 0.001) >= safeRatio) {
+    height = width / safeRatio;
+  } else {
+    width = height * safeRatio;
+  }
+
+  const fitScale = Math.min(1, maxWidth / Math.max(width, 1), maxHeight / Math.max(height, 1));
+  width = Math.max(1, width * fitScale);
+  height = Math.max(1, height * fitScale);
+
+  let x = directionX > 0 ? start.x : start.x - width;
+  let y = directionY > 0 ? start.y : start.y - height;
+
+  x = clamp(x, 0, naturalWidth - width);
+  y = clamp(y, 0, naturalHeight - height);
+
+  return {
+    x,
+    y,
+    width,
+    height
   };
 }
 
@@ -92,22 +172,28 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
 
   const naturalWidth = panel.image?.naturalWidth ?? panel.width;
   const naturalHeight = panel.image?.naturalHeight ?? panel.height;
+  const frameWidth = Math.max(1, panel.width - panel.gap * 2);
+  const frameHeight = Math.max(1, panel.height - panel.gap * 2);
+  const frameRatio = frameWidth / frameHeight;
+  const frameRatioText = `${Math.round(frameWidth)}:${Math.round(frameHeight)}`;
   const initialCrop: CropDraft = useMemo(
-    () =>
-      panel.image?.crop
-        ? {
+    () => {
+      if (panel.image?.crop) {
+        return normalizeCropToRatio(
+          {
             x: panel.image.crop.x,
             y: panel.image.crop.y,
             width: panel.image.crop.width,
             height: panel.image.crop.height
-          }
-        : {
-            x: 0,
-            y: 0,
-            width: naturalWidth,
-            height: naturalHeight
           },
-    [naturalHeight, naturalWidth, panel.image?.crop]
+          naturalWidth,
+          naturalHeight,
+          frameRatio
+        );
+      }
+      return createCenteredCropWithRatio(naturalWidth, naturalHeight, frameRatio);
+    },
+    [frameRatio, naturalHeight, naturalWidth, panel.image?.crop]
   );
 
   const [draft, setDraft] = useState<CropDraft>(initialCrop);
@@ -141,9 +227,13 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
       return;
     }
 
-    const point = toNaturalPoint(event);
+    const rawPoint = toNaturalPoint(event);
+    const point = {
+      x: clamp(rawPoint.x, 0, Math.max(0, naturalWidth - 1)),
+      y: clamp(rawPoint.y, 0, Math.max(0, naturalHeight - 1))
+    };
     setDragStart(point);
-    setDraft({ x: point.x, y: point.y, width: 1, height: 1 });
+    setDraft(createCropFromPointsWithRatio(point, point, naturalWidth, naturalHeight, frameRatio));
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
@@ -153,7 +243,7 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
     }
 
     const point = toNaturalPoint(event);
-    setDraft(createCropFromPoints(dragStart, point, naturalWidth, naturalHeight));
+    setDraft(createCropFromPointsWithRatio(dragStart, point, naturalWidth, naturalHeight, frameRatio));
   };
 
   const onPointerUp = (event: PointerEvent<HTMLDivElement>) => {
@@ -162,7 +252,7 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
     }
 
     const point = toNaturalPoint(event);
-    setDraft(createCropFromPoints(dragStart, point, naturalWidth, naturalHeight));
+    setDraft(createCropFromPointsWithRatio(dragStart, point, naturalWidth, naturalHeight, frameRatio));
     setDragStart(null);
 
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -191,7 +281,9 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
           </button>
         </div>
 
-        <p className="mt-2 text-xs text-slate-400">拖拽框选要保留的区域。原图会保留在本地，分镜只显示裁剪结果。</p>
+        <p className="mt-2 text-xs text-slate-400">
+          拖拽框选要保留的区域。裁剪框比例固定为分镜比例 {frameRatioText}，原图会保留在本地。
+        </p>
 
         <div
           className="relative mx-auto mt-4 overflow-hidden rounded-lg border border-slate-700 bg-slate-950"
@@ -239,16 +331,9 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
           </button>
           <button
             className={buttonClass}
-            onClick={() =>
-              setDraft({
-                x: 0,
-                y: 0,
-                width: naturalWidth,
-                height: naturalHeight
-              })
-            }
+            onClick={() => setDraft(createCenteredCropWithRatio(naturalWidth, naturalHeight, frameRatio))}
           >
-            选择整图
+            匹配比例最大区域
           </button>
           <button
             className={buttonClass}

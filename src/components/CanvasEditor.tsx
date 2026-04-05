@@ -48,20 +48,23 @@ function PanelImageLayer({ panel }: { panel: Panel }) {
   const innerHeight = Math.max(1, panel.height - panel.gap * 2);
 
   const crop = panel.image.crop;
-  const scale = crop?.scale ?? 1;
-  const drawWidth = innerWidth * scale;
-  const drawHeight = innerHeight * scale;
-  const offsetX = panel.gap - (drawWidth - innerWidth) / 2;
-  const offsetY = panel.gap - (drawHeight - innerHeight) / 2;
+  const sourceWidth = crop?.width ?? panel.image.naturalWidth ?? image.width;
+  const sourceHeight = crop?.height ?? panel.image.naturalHeight ?? image.height;
+  const coverScale = Math.max(innerWidth / Math.max(1, sourceWidth), innerHeight / Math.max(1, sourceHeight));
+  const drawScale = coverScale * (crop?.scale ?? 1);
+  const drawWidth = sourceWidth * drawScale;
+  const drawHeight = sourceHeight * drawScale;
+  const offsetX = panel.gap + (innerWidth - drawWidth) / 2;
+  const offsetY = panel.gap + (innerHeight - drawHeight) / 2;
 
   return (
     <Group clipX={panel.gap} clipY={panel.gap} clipWidth={innerWidth} clipHeight={innerHeight}>
       <KonvaImage
         image={image}
-        x={crop ? offsetX : panel.gap}
-        y={crop ? offsetY : panel.gap}
-        width={crop ? drawWidth : innerWidth}
-        height={crop ? drawHeight : innerHeight}
+        x={offsetX}
+        y={offsetY}
+        width={drawWidth}
+        height={drawHeight}
         crop={
           crop
             ? {
