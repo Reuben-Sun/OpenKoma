@@ -68,3 +68,16 @@
   - 导出前临时把 Stage 缩放归一到 `1x`，按画布原始尺寸导出，避免受当前缩放倍率影响
   - PDF 通过 `jspdf` 将 PNG 嵌入单页文档导出
 - 气泡文本从 DOM `Html` 改为 Konva `Text`，保证导出图中包含气泡文字
+
+## 2026-04-05 - undo/redo 改为增量式历史
+
+- 依赖新增：`fast-json-patch`
+- 历史结构改为操作补丁：
+  - `historyPast: { forward: Operation[]; backward: Operation[] }[]`
+  - `historyFuture: { forward: Operation[]; backward: Operation[] }[]`
+- 新增行为：
+  - 每次状态变更通过 `compare(previous, next)` 计算 forward patch
+  - 同步计算 backward patch，用于撤销
+  - `undo` 应用 backward patch，`redo` 应用 forward patch
+- 无实际变更时不再写入历史（避免空操作污染历史）
+- 历史上限仍为 `80`，行为保持一致

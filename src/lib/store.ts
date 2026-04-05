@@ -1,15 +1,21 @@
 import { create } from "zustand";
 import { v4 as uuidv4 } from "uuid";
+import { applyPatch, compare, type Operation } from "fast-json-patch";
 import { generateImage, loadProject as loadProjectApi, saveProject as saveProjectApi } from "./api";
 import { clamp, createBubble as createBubbleFactory, createEmptyProject, createPanel, splitGridPanels } from "./project";
 import { Bubble, BubbleType, CanvasPreset, CropConfig, Panel, Project, Selection } from "../types";
+
+type HistoryEntry = {
+  forward: Operation[];
+  backward: Operation[];
+};
 
 type EditorStore = {
   project: Project;
   selection?: Selection;
   manualPanelMode: boolean;
-  historyPast: Project[];
-  historyFuture: Project[];
+  historyPast: HistoryEntry[];
+  historyFuture: HistoryEntry[];
   busy: {
     generatingPanelId?: string;
     loadingProject: boolean;
@@ -57,8 +63,29 @@ function cloneProject(project: Project): Project {
   return structuredClone(project);
 }
 
+function createHistoryEntry(previous: Project, next: Project): HistoryEntry | null {
+  const forward = compare(previous, next);
+  if (forward.length === 0) {
+    return null;
+  }
+  const backward = compare(next, previous);
+  return {
+    forward,
+    backward
+  };
+}
+
+function applyHistory(project: Project, operations: Operation[]): Project {
+  return applyPatch(cloneProject(project), operations, false, true).newDocument as Project;
+}
+
 function withHistory(state: Pick<EditorStore, "project" | "historyPast">, nextProject: Project) {
-  const nextPast = [...state.historyPast, cloneProject(state.project)];
+  const entry = createHistoryEntry(state.project, nextProject);
+  if (!entry) {
+    return null;
+  }
+
+  const nextPast = [...state.historyPast, entry];
   if (nextPast.length > HISTORY_LIMIT) {
     nextPast.shift();
   }
@@ -66,7 +93,7 @@ function withHistory(state: Pick<EditorStore, "project" | "historyPast">, nextPr
   return {
     project: nextProject,
     historyPast: nextPast,
-    historyFuture: [] as Project[]
+    historyFuture: [] as HistoryEntry[]
   };
 }
 
@@ -121,12 +148,12 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         };
       }
 
-      const previous = state.historyPast[state.historyPast.length - 1];
+      const entry = state.historyPast[state.historyPast.length - 1];
       const nextPast = state.historyPast.slice(0, -1);
-      const nextFuture = [cloneProject(state.project), ...state.historyFuture].slice(0, HISTORY_LIMIT);
+      const nextFuture = [entry, ...state.historyFuture].slice(0, HISTORY_LIMIT);
 
       return {
-        project: cloneProject(previous),
+        project: applyHistory(state.project, entry.backward),
         historyPast: nextPast,
         historyFuture: nextFuture,
         selection: undefined,
@@ -143,12 +170,12 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         };
       }
 
-      const next = state.historyFuture[0];
+      const entry = state.historyFuture[0];
       const nextFuture = state.historyFuture.slice(1);
-      const nextPast = [...state.historyPast, cloneProject(state.project)].slice(-HISTORY_LIMIT);
+      const nextPast = [...state.historyPast, entry].slice(-HISTORY_LIMIT);
 
       return {
-        project: cloneProject(next),
+        project: applyHistory(state.project, entry.forward),
         historyPast: nextPast,
         historyFuture: nextFuture,
         selection: undefined,
@@ -168,8 +195,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         name
       };
 
+      const historyState = withHistory(state, nextProject);
+      if (!historyState) {
+        return state;
+      }
+
       return {
-        ...withHistory(state, nextProject)
+        ...historyState
       };
     });
   },
@@ -193,8 +225,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         }
       };
 
+      const historyState = withHistory(state, nextProject);
+      if (!historyState) {
+        return state;
+      }
+
       return {
-        ...withHistory(state, nextProject),
+        ...historyState,
         notice: `画布已切换为 ${preset}`
       };
     });
@@ -212,8 +249,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         }
       };
 
+      const historyState = withHistory(state, nextProject);
+      if (!historyState) {
+        return state;
+      }
+
       return {
-        ...withHistory(state, nextProject)
+        ...historyState
       };
     });
   },
@@ -228,8 +270,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         panels: splitGridPanels(state.project.canvas.width, state.project.canvas.height, safeRows, safeCols)
       };
 
+      const historyState = withHistory(state, nextProject);
+      if (!historyState) {
+        return state;
+      }
+
       return {
-        ...withHistory(state, nextProject),
+        ...historyState,
         selection: undefined,
         notice: `已按 ${safeRows} x ${safeCols} 网格切割`
       };
@@ -284,8 +331,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         panels: [...state.project.panels.filter((panel) => panel.id !== target.id), ...children]
       };
 
+      const historyState = withHistory(state, nextProject);
+      if (!historyState) {
+        return state;
+      }
+
       return {
-        ...withHistory(state, nextProject),
+        ...historyState,
         selection: {
           kind: "panel",
           id: children[0]?.id ?? target.id
@@ -318,8 +370,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         panels: [...state.project.panels, panel]
       };
 
+      const historyState = withHistory(state, nextProject);
+      if (!historyState) {
+        return state;
+      }
+
       return {
-        ...withHistory(state, nextProject),
+        ...historyState,
         selection: {
           kind: "panel",
           id: panel.id
@@ -363,8 +420,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
           panels: nextPanels
         };
 
+        const historyState = withHistory(state, nextProject);
+        if (!historyState) {
+          return state;
+        }
+
         return {
-          ...withHistory(state, nextProject),
+          ...historyState,
           selection: undefined,
           notice: "已删除分镜"
         };
@@ -376,8 +438,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         bubbles: nextBubbles
       };
 
+      const historyState = withHistory(state, nextProject);
+      if (!historyState) {
+        return state;
+      }
+
       return {
-        ...withHistory(state, nextProject),
+        ...historyState,
         selection: undefined,
         notice: "已删除气泡"
       };
@@ -395,8 +462,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         panels: replacePanel(state.project.panels, id, patch)
       };
 
+      const historyState = withHistory(state, nextProject);
+      if (!historyState) {
+        return state;
+      }
+
       return {
-        ...withHistory(state, nextProject)
+        ...historyState
       };
     });
   },
@@ -426,8 +498,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         })
       };
 
+      const historyState = withHistory(state, nextProject);
+      if (!historyState) {
+        return state;
+      }
+
       return {
-        ...withHistory(state, nextProject)
+        ...historyState
       };
     });
   },
@@ -440,8 +517,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         bubbles: [...state.project.bubbles, bubble]
       };
 
+      const historyState = withHistory(state, nextProject);
+      if (!historyState) {
+        return state;
+      }
+
       return {
-        ...withHistory(state, nextProject),
+        ...historyState,
         selection: {
           kind: "bubble",
           id: bubble.id
@@ -492,8 +574,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         })
       };
 
+      const historyState = withHistory(state, nextProject);
+      if (!historyState) {
+        return state;
+      }
+
       return {
-        ...withHistory(state, nextProject)
+        ...historyState
       };
     });
   },
@@ -521,8 +608,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         })
       };
 
+      const historyState = withHistory(state, nextProject);
+      if (!historyState) {
+        return state;
+      }
+
       return {
-        ...withHistory(state, nextProject)
+        ...historyState
       };
     });
   },
@@ -574,8 +666,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
           })
         };
 
+        const historyState = withHistory(state, nextProject);
+        if (!historyState) {
+          return state;
+        }
+
         return {
-          ...withHistory(state, nextProject),
+          ...historyState,
           notice: "图像生成完成"
         };
       });
