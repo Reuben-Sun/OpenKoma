@@ -1,39 +1,93 @@
-# OpenKoma
+<div align="center">
 
-本项目是本地运行的 AI 漫画编辑器 MVP，实现了设计文档中的核心流程：
+<h1>OpenKoma</h1>
 
-- 自定义画布（含 A4/A3 预设）
-- 分镜网格切割 + 手绘分镜 + 选中分镜二次切割
-- Konva 画布中的分镜拖拽、缩放、选中高亮
-- Inspector 属性编辑（位置尺寸、边框、Prompt）
-- AI 生成接口代理（本地 `/api/generate`）
-- 图像非破坏裁剪（保留 `image.original`，仅改 `crop`）
-- 漫画气泡系统（矩形/圆角/圆形，横排/竖排文字）
-- 历史记录（undo/redo，支持快捷键）
-- 整页导出（PNG / PDF）
-- 项目本地保存/加载（`project/project.json`）
+<p><strong>Local-First AI Comic Editor</strong><br/>A reproducible open-source workflow for comic panel layout, image composition, and incremental editing history.</p>
 
-## 技术栈
+<p>
+  <img alt="license" src="https://img.shields.io/badge/License-Apache%202.0-2ea44f?style=for-the-badge" />
+  <img alt="frontend" src="https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-61dafb?style=for-the-badge" />
+  <img alt="canvas" src="https://img.shields.io/badge/Canvas-Konva-0ea5e9?style=for-the-badge" />
+  <img alt="backend" src="https://img.shields.io/badge/Backend-Node%20%2B%20Express-111827?style=for-the-badge" />
+  <img alt="state" src="https://img.shields.io/badge/State-Zustand-f59e0b?style=for-the-badge" />
+</p>
 
-- Frontend: React + TypeScript + Zustand + Konva + TailwindCSS
-- Backend: Node.js + Express
-- Storage: 本地 JSON + 本地图片文件
+<p>
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/react/react-original.svg" width="28" alt="React" />
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/typescript/typescript-original.svg" width="28" alt="TypeScript" />
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/nodejs/nodejs-original.svg" width="28" alt="Node.js" />
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/express/express-original.svg" width="28" alt="Express" />
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/vitejs/vitejs-original.svg" width="28" alt="Vite" />
+</p>
 
-## 快速启动
+</div>
 
+## Abstract
+OpenKoma is a local-first comic creation environment focused on practical production workflows: panel composition, bubble editing, non-destructive local image import + cropping, reversible operations, multi-page management, and high-fidelity export.
+
+Unlike many demo-grade tools, OpenKoma persists both structure (`project.json`) and operation history (`history.log`) so that editing intent can be reconstructed and replayed across sessions.
+
+## Contributions
+1. Incremental reversible editing via JSON Patch (`undo/redo` based on forward/backward patches).
+2. Non-destructive image workflow: original image is preserved, display uses crop metadata only.
+3. Multi-page pipeline with sortable page list and ordered multi-page PDF export.
+4. Project persistence split into layout and history, improving clarity and long-term maintainability.
+5. Local-first strategy with graceful fallback when file-system picker APIs are unavailable.
+
+## Method Overview
+```mermaid
+flowchart LR
+    A[Toolbar / Inspector / Canvas] --> B[Zustand Store]
+    B --> C[Patch Builder\nforward + backward]
+    C --> D[historyPast / historyFuture]
+    B --> E[Project Document]
+    E --> F[project.json\n(layout)]
+    E --> G[history.log\n(messages + patches)]
+    B --> H[Image Assets]
+    H --> I[project/images or temp/images]
+    E --> J[Exporter]
+    J --> K[PNG current page]
+    J --> L[PDF all pages in order]
+```
+
+## Core Features
+- Canvas presets and custom dimensions (A4/A3 + manual size).
+- Panel operations: split grid, draw-by-drag, drag/resize, per-panel style, global style one-click apply.
+- Bubble system: rectangle/rounded/circle with horizontal and vertical text.
+- Local image import and manual crop editor:
+  - Crop box keeps panel aspect ratio.
+  - Drag inside to move; drag edges to resize.
+  - After panel resize, crop is auto-adjusted while keeping center priority.
+- 16-multiple snapping mode during resize/transform.
+- Multi-page list: add/delete/reorder/switch pages.
+- Incremental action messages shown in status area; undo/redo references operation intent.
+- Export:
+  - PNG: current page.
+  - PDF: all pages in current order.
+- Theme support: light/dark mode via Radix UI switch.
+
+## Reproducibility
+### Environment
+- Node.js 18+
+- npm 9+
+
+### Setup
 ```bash
 npm install
 npm run dev
 ```
 
-默认启动：
+Default endpoints:
+- Web: `http://localhost:5173`
+- API: `http://localhost:3001`
 
-- 前端: `http://localhost:5173`
-- 后端: `http://localhost:3001`
+### Build Check
+```bash
+npm run build
+```
 
-## 环境变量（可选）
-
-在根目录创建 `.env`：
+## Optional Environment Variables
+Create `.env` in repository root:
 
 ```bash
 PORT=3001
@@ -41,28 +95,47 @@ AI_IMAGE_API_URL=
 AI_IMAGE_API_KEY=
 ```
 
-说明：
+Behavior:
+- If `AI_IMAGE_API_URL` is empty, `/api/generate` returns a local SVG placeholder for offline development.
+- If configured, prompt payload is forwarded and response images are materialized as local assets.
 
-- 未配置 `AI_IMAGE_API_URL` 时，`/api/generate` 会回退到本地 SVG 占位图生成（用于离线开发验证）
-- 配置了 `AI_IMAGE_API_URL` 时，会透传 `prompt/negativePrompt/width/height` 到远端并将返回图保存到本地
+## Storage Format
+A saved project directory contains:
 
-## API
+```text
+<project-root>/
+├── project.json      # layout document: canvas/pages/panels/bubbles/assets refs
+├── history.log       # operation log: messages + incremental history patches
+└── images/           # imported/generated source images
+```
 
+For unsaved work, temporary snapshots are stored under:
+
+```text
+project/temp/<projectId>/
+```
+
+If directory-picker APIs are not available in runtime environment, save/load falls back to:
+
+```text
+./project/project.json
+./project/history.log
+./project/images/*
+```
+
+## API Snapshot
 ### `POST /api/generate`
-
-请求：
-
+Input:
 ```json
 {
-  "prompt": "漫画分镜，一个少年站在雨中，赛博朋克风格，高细节",
+  "prompt": "comic storyboard, rainy cyberpunk street",
   "negativePrompt": "",
   "width": 1024,
   "height": 768
 }
 ```
 
-响应：
-
+Output:
 ```json
 {
   "url": "/assets/images/xxx.png",
@@ -71,56 +144,35 @@ AI_IMAGE_API_KEY=
 }
 ```
 
-### `POST /api/project/save`
+### `POST /api/images/upload`
+- Upload a local file and receive a local asset URL plus natural size metadata.
 
-请求：
+### `POST /api/project/save` and `GET /api/project/load`
+- Fallback persistence APIs used when browser path-picking is not supported.
 
-```json
-{
-  "project": { "...": "..." }
+## Roadmap
+- PSD layered export.
+- Multi-select and batch align/distribute.
+- Template packs for manga/comic layout presets.
+- More advanced typography and bubble tail editing.
+
+## Citation
+If this project helps your research or tooling, you can cite it as:
+
+```bibtex
+@software{openkoma2026,
+  title = {OpenKoma: A Local-First AI Comic Editor with Incremental Reversible History},
+  author = {OpenKoma Authors},
+  year = {2026},
+  url = {https://github.com/<your-org>/OpenKoma},
+  license = {Apache-2.0}
 }
 ```
 
-### `GET /api/project/load`
+## Acknowledgements
+- React, Konva, Zustand, Vite, Express, fast-json-patch, jsPDF, Radix Themes.
 
-响应：
+## License
+This repository is licensed under the Apache License 2.0.
 
-```json
-{
-  "project": { "...": "..." }
-}
-```
-
-## 目录结构
-
-```text
-.
-├── server/
-│   └── index.js
-├── src/
-│   ├── components/
-│   │   ├── CanvasEditor.tsx
-│   │   ├── InspectorPanel.tsx
-│   │   └── Toolbar.tsx
-│   ├── lib/
-│   │   ├── api.ts
-│   │   ├── project.ts
-│   │   └── store.ts
-│   ├── App.tsx
-│   ├── main.tsx
-│   └── types.ts
-└── project/
-    ├── project.json
-    └── images/
-```
-
-## 已实现范围
-
-- P0: 已覆盖
-- P1: 气泡、边框/间距、竖排文字已覆盖
-- P2: 已覆盖 `undo/redo` 与 `PNG/PDF` 导出
-
-## 快捷键
-
-- `Cmd/Ctrl + Z`: 撤销
-- `Cmd/Ctrl + Shift + Z` 或 `Ctrl + Y`: 重做
+See [LICENSE](./LICENSE) for the full text.

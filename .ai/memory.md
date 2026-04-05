@@ -602,3 +602,24 @@
     - 保留边框与 hover 边线增强逻辑
 - 验证：
   - `npm run build` 通过
+
+## 2026-04-05 - README 论文式重写 + Apache-2.0 License（增量）
+
+- 目标：
+  - 将项目 README 重写为更接近 AI 论文开源仓库的呈现风格
+  - 增加 Apache License 2.0 许可证文件
+- 实现：
+  - `README.md`
+    - 重构为论文式结构：`Abstract / Contributions / Method Overview / Reproducibility / Storage Format / API Snapshot / Citation`
+    - 增加 HTML 徽章与技术图标（badges + devicon）
+    - 补充当前架构和能力说明：
+      - 增量式历史与可逆编辑
+      - 非破坏图像裁剪
+      - 多页面与按顺序 PDF 导出
+      - `project.json + history.log + images/` 存档结构
+      - `project/temp/<projectId>` 未保存临时快照机制
+  - `LICENSE`
+    - 新增 Apache License 2.0 完整文本
+    - 附带版权声明：`Copyright 2026 OpenKoma Authors`
+- 验证：
+  - `npm run build` 通过
