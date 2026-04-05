@@ -30,6 +30,12 @@ function triggerDownload(dataUrl: string, filename: string) {
   anchor.click();
 }
 
+function snapSize(value: number, minValue: number, step = 16) {
+  const minMultiple = Math.ceil(minValue / step) * step;
+  const snapped = Math.round(value / step) * step;
+  return Math.max(minMultiple, snapped);
+}
+
 function PanelImageLayer({ panel }: { panel: Panel }) {
   const imageUrl = panel.image?.original ?? "";
   const [image] = useImage(imageUrl, "anonymous");
@@ -130,6 +136,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
   const project = useEditorStore((state) => state.project);
   const selection = useEditorStore((state) => state.selection);
   const manualPanelMode = useEditorStore((state) => state.manualPanelMode);
+  const snapSizeTo16 = useEditorStore((state) => state.snapSizeTo16);
 
   const setNotice = useEditorStore((state) => state.setNotice);
   const selectPanel = useEditorStore((state) => state.selectPanel);
@@ -389,15 +396,23 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
                       selectPanel(panel.id);
                     }}
                     onDragEnd={(event) => {
+                      const nextWidth = snapSizeTo16 ? snapSize(panel.width, 24) : panel.width;
+                      const nextHeight = snapSizeTo16 ? snapSize(panel.height, 24) : panel.height;
                       updatePanel(panel.id, {
                         x: event.target.x(),
-                        y: event.target.y()
+                        y: event.target.y(),
+                        width: nextWidth,
+                        height: nextHeight
                       });
                     }}
                     onTransformEnd={(event) => {
                       const node = event.target;
-                      const nextWidth = Math.max(24, node.width() * node.scaleX());
-                      const nextHeight = Math.max(24, node.height() * node.scaleY());
+                      let nextWidth = Math.max(24, node.width() * node.scaleX());
+                      let nextHeight = Math.max(24, node.height() * node.scaleY());
+                      if (snapSizeTo16) {
+                        nextWidth = snapSize(nextWidth, 24);
+                        nextHeight = snapSize(nextHeight, 24);
+                      }
                       node.scaleX(1);
                       node.scaleY(1);
                       updatePanel(panel.id, {
@@ -441,15 +456,23 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
                       selectBubble(bubble.id);
                     }}
                     onDragEnd={(event) => {
+                      const nextWidth = snapSizeTo16 ? snapSize(bubble.width, 30) : bubble.width;
+                      const nextHeight = snapSizeTo16 ? snapSize(bubble.height, 30) : bubble.height;
                       updateBubble(bubble.id, {
                         x: event.target.x(),
-                        y: event.target.y()
+                        y: event.target.y(),
+                        width: nextWidth,
+                        height: nextHeight
                       });
                     }}
                     onTransformEnd={(event) => {
                       const node = event.target;
-                      const nextWidth = Math.max(30, node.width() * node.scaleX());
-                      const nextHeight = Math.max(30, node.height() * node.scaleY());
+                      let nextWidth = Math.max(30, node.width() * node.scaleX());
+                      let nextHeight = Math.max(30, node.height() * node.scaleY());
+                      if (snapSizeTo16) {
+                        nextWidth = snapSize(nextWidth, 30);
+                        nextHeight = snapSize(nextHeight, 30);
+                      }
                       node.scaleX(1);
                       node.scaleY(1);
                       updateBubble(bubble.id, {
@@ -491,13 +514,24 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
               <Transformer
                 ref={transformerRef}
                 rotateEnabled={false}
+                flipEnabled={false}
                 borderStroke="#2563eb"
                 anchorStroke="#2563eb"
                 anchorFill="#bfdbfe"
                 boundBoxFunc={(oldBox, newBox) => {
-                  if (newBox.width < 24 || newBox.height < 24) {
+                  const minSize = selection?.kind === "bubble" ? 30 : 24;
+                  if (newBox.width < minSize || newBox.height < minSize) {
                     return oldBox;
                   }
+
+                  if (snapSizeTo16) {
+                    return {
+                      ...newBox,
+                      width: snapSize(newBox.width, minSize),
+                      height: snapSize(newBox.height, minSize)
+                    };
+                  }
+
                   return newBox;
                 }}
               />

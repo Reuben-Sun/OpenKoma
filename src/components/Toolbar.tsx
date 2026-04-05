@@ -16,6 +16,7 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
   const project = useEditorStore((state) => state.project);
   const selection = useEditorStore((state) => state.selection);
   const manualPanelMode = useEditorStore((state) => state.manualPanelMode);
+  const snapSizeTo16 = useEditorStore((state) => state.snapSizeTo16);
   const busy = useEditorStore((state) => state.busy);
   const notice = useEditorStore((state) => state.notice);
   const historyPastCount = useEditorStore((state) => state.historyPast.length);
@@ -30,6 +31,7 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
   const splitGrid = useEditorStore((state) => state.splitGrid);
   const splitSelectedPanel = useEditorStore((state) => state.splitSelectedPanel);
   const toggleManualPanelMode = useEditorStore((state) => state.toggleManualPanelMode);
+  const toggleSnapSizeTo16 = useEditorStore((state) => state.toggleSnapSizeTo16);
   const addBubble = useEditorStore((state) => state.addBubble);
   const saveProject = useEditorStore((state) => state.saveProject);
   const loadProject = useEditorStore((state) => state.loadProject);
@@ -138,6 +140,13 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
           onClick={() => toggleManualPanelMode()}
         >
           手绘分镜
+        </button>
+
+        <button
+          className={`${buttonClass} ${snapSizeTo16 ? "border-emerald-400 bg-emerald-500/30" : ""}`}
+          onClick={() => toggleSnapSizeTo16()}
+        >
+          16 倍数尺寸
         </button>
 
         <span className="ml-4 text-xs text-slate-400">选中分镜二次切割</span>

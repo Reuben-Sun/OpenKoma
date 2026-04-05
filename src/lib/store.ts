@@ -14,6 +14,7 @@ type EditorStore = {
   project: Project;
   selection?: Selection;
   manualPanelMode: boolean;
+  snapSizeTo16: boolean;
   historyPast: HistoryEntry[];
   historyFuture: HistoryEntry[];
   busy: {
@@ -49,6 +50,7 @@ type EditorStore = {
   addBubble: (type: BubbleType) => void;
 
   toggleManualPanelMode: (enabled?: boolean) => void;
+  toggleSnapSizeTo16: (enabled?: boolean) => void;
 
   setPanelCrop: (id: string, crop: CropConfig) => void;
   resetPanelCrop: (id: string) => void;
@@ -132,6 +134,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   project: createEmptyProject(),
   selection: undefined,
   manualPanelMode: false,
+  snapSizeTo16: false,
   historyPast: [],
   historyFuture: [],
   busy: {
@@ -576,6 +579,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     set((state) => ({
       manualPanelMode: enabled ?? !state.manualPanelMode,
       notice: (enabled ?? !state.manualPanelMode) ? "手绘分镜模式已开启" : "手绘分镜模式已关闭"
+    }));
+  },
+
+  toggleSnapSizeTo16: (enabled) => {
+    set((state) => ({
+      snapSizeTo16: enabled ?? !state.snapSizeTo16,
+      notice: (enabled ?? !state.snapSizeTo16) ? "已开启 16 倍数尺寸吸附" : "已关闭 16 倍数尺寸吸附"
     }));
   },
 

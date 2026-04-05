@@ -97,3 +97,15 @@
   - 选中分镜后可“导入本地图片”
   - “打开手动裁剪”弹窗：可拖拽框选保留区域
   - 保持非破坏流程：原图路径仍保存在 `panel.image.original`，只修改 `panel.image.crop`
+
+## 2026-04-05 - 16 倍数尺寸吸附开关
+
+- `Toolbar` 新增按钮：`16 倍数尺寸`
+  - 开启后，拖动/缩放后会强制把对象宽高吸附到 16 的倍数
+- `store` 新增状态：
+  - `snapSizeTo16: boolean`
+  - `toggleSnapSizeTo16(enabled?)`
+- `CanvasEditor` 行为更新：
+  - 分镜和气泡 `onTransformEnd` 时宽高吸附到 16 的倍数
+  - `Transformer.boundBoxFunc` 在开启开关后实时吸附尺寸
+  - `flipEnabled` 关闭，避免翻转导致吸附异常
