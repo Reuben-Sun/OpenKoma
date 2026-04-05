@@ -214,7 +214,7 @@ export default function PageSidebar() {
       <div className="flex items-center justify-between border-b border-[var(--line-soft)] px-3.5 py-3">
         <div>
           <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">Storyboard</p>
-          <h3 className="text-sm font-semibold text-[var(--text-primary)]">页面胶片栏</h3>
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">页面列表</h3>
         </div>
         <button className={`${buttonClass} studio-btn-primary`} onClick={() => addPage()}>
           + 新增
