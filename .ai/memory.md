@@ -587,3 +587,18 @@
 - 实现：
   - `src/components/PageSidebar.tsx`
     - 左侧页面区域标题由 `页面胶片栏` 调整为 `页面列表`
+
+## 2026-04-05 - 修复明亮模式下未选中页面卡片过暗（增量）
+
+- 目标：
+  - 修复页面列表在明亮模式下未选中项仍偏黑的问题
+- 实现：
+  - `src/components/PageSidebar.tsx`
+    - 未选中页面卡片背景由硬编码深色：
+      - `bg-[rgba(12,18,28,0.72)]`
+    - 改为主题变量：
+      - `bg-[var(--panel-1)]`
+      - `hover:bg-[var(--panel-0)]`
+    - 保留边框与 hover 边线增强逻辑
+- 验证：
+  - `npm run build` 通过

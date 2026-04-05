@@ -234,7 +234,7 @@ export default function PageSidebar() {
               className={`rounded-2xl border p-2.5 transition ${
                 isActive
                   ? "border-[var(--accent)] bg-[var(--accent-soft)] shadow-[0_12px_26px_rgba(2,42,56,0.35)]"
-                  : "border-[var(--line-soft)] bg-[rgba(12,18,28,0.72)] hover:border-[var(--line-strong)]"
+                  : "border-[var(--line-soft)] bg-[var(--panel-1)] hover:border-[var(--line-strong)] hover:bg-[var(--panel-0)]"
               }`}
             >
               <button
