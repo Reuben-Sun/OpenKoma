@@ -1,0 +1,70 @@
+# OpenKoma Memory
+
+## 2026-04-05 - 初版实现（基于 .ai/design.md）
+
+### 已落地技术栈
+- 前端: React + TypeScript + Zustand + Konva + TailwindCSS
+- 后端: Node.js + Express
+- 存储: `project/project.json` + `project/images/*`
+
+### 关键文件
+- `src/types.ts`: Project/Canvas/Panel/Crop/Bubble 类型定义
+- `src/lib/store.ts`: Zustand 主状态与动作（分镜、气泡、生成、裁剪、保存/加载）
+- `src/components/CanvasEditor.tsx`: Konva 编辑器主画布
+- `src/components/InspectorPanel.tsx`: 右侧属性编辑
+- `src/components/Toolbar.tsx`: 顶部工具栏
+- `server/index.js`: 本地 API 代理和项目 IO
+
+### 当前功能覆盖
+- P0: 画布 + Panel、选中 + Inspector、AI 生成、图片显示、基础裁剪
+- P1: 气泡系统、间距/边框、竖排文字（使用 `writing-mode: vertical-rl`）
+- 二次切割: 选中分镜后按行列切割为子分镜
+- 手动绘制: 手绘模式下拖拽创建分镜
+
+### AI 生成实现细节
+- 接口: `POST /api/generate`
+- 默认行为: 未配置 `AI_IMAGE_API_URL` 时生成本地 SVG 占位图（离线可用）
+- 远端代理: 配置 `AI_IMAGE_API_URL` 后转发 `prompt/negativePrompt/width/height`
+  - 支持远端返回 `url` 或 `imageBase64`
+  - 下载/写入到 `project/images` 后回传本地可访问地址 `/assets/images/...`
+
+### 非破坏裁剪实现
+- `panel.image.original` 始终保留原图路径
+- 裁剪参数存于 `panel.image.crop`
+- Konva `Image.crop` 仅改变显示窗口，不改原始文件
+
+### 已知未实现项
+- undo/redo
+- 导出 PNG/PDF/PSD
+- 多选与批量操作
+- 高级版式模板
+
+### 验证结果
+- `npm install` 成功
+- `npm run build` 成功
+
+## 2026-04-05 - 追加修正
+
+- 构建脚本改为纯 type-check：
+  - `tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit && vite build`
+  - 避免产生 `vite.config.js/.d.ts` 与 `*.tsbuildinfo` 副产物
+- 修复手绘分镜最小尺寸逻辑：拖拽小于 `24x24` 不再创建分镜
+- 修复二次切割容错：`rows/cols` 强制最小为 `1`，提示文案使用安全值
+- 后端远端 URL 解析改为 `new URL(body.url, "http://localhost")`，兼容相对路径返回
+
+## 2026-04-05 - 新增 undo/redo 与导出
+
+- 状态管理新增历史栈：
+  - `historyPast: Project[]`
+  - `historyFuture: Project[]`
+  - `undo()` / `redo()`
+  - 历史上限 `80`
+- 绝大多数会修改 `project` 的动作都纳入历史（分镜、气泡、裁剪、生成图结果等）
+- 键盘快捷键：
+  - `Cmd/Ctrl + Z` 撤销
+  - `Cmd/Ctrl + Shift + Z` 与 `Ctrl + Y` 重做
+- 导出实现：
+  - `CanvasEditor` 暴露 `exportPng()` / `exportPdf()`
+  - 导出前临时把 Stage 缩放归一到 `1x`，按画布原始尺寸导出，避免受当前缩放倍率影响
+  - PDF 通过 `jspdf` 将 PNG 嵌入单页文档导出
+- 气泡文本从 DOM `Html` 改为 Konva `Text`，保证导出图中包含气泡文字
