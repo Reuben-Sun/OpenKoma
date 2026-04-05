@@ -12,6 +12,7 @@
     "start:server": "node server/index.js"
   },
   "dependencies": {
+    "@radix-ui/themes": "^3.3.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",

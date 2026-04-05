@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import { Switch } from "@radix-ui/themes";
 import { getActivePage, useEditorStore } from "../lib/store";
 
 const inputClass = "studio-input h-9 px-3 text-sm";
@@ -49,7 +50,7 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
   const splitSelectedPanel = useEditorStore((state) => state.splitSelectedPanel);
   const toggleManualPanelMode = useEditorStore((state) => state.toggleManualPanelMode);
   const toggleSnapSizeTo16 = useEditorStore((state) => state.toggleSnapSizeTo16);
-  const toggleThemeMode = useEditorStore((state) => state.toggleThemeMode);
+  const setThemeMode = useEditorStore((state) => state.setThemeMode);
   const addBubble = useEditorStore((state) => state.addBubble);
   const saveProject = useEditorStore((state) => state.saveProject);
   const saveProjectAs = useEditorStore((state) => state.saveProjectAs);
@@ -159,20 +160,21 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
               {categoryTitleMap[category]}
             </button>
           ))}
-          <button
-            type="button"
-            aria-label="切换黑暗模式"
-            role="switch"
-            aria-checked={themeMode === "dark"}
-            className="theme-switch"
-            data-mode={themeMode}
-            onClick={() => toggleThemeMode()}
-            title={themeMode === "dark" ? "切换为明亮模式" : "切换为黑暗模式"}
-          >
-            <span className="theme-switch__thumb" aria-hidden="true" />
-            <span className="theme-switch__option theme-switch__option--light">亮</span>
-            <span className="theme-switch__option theme-switch__option--dark">暗</span>
-          </button>
+          <div className="studio-subtle flex h-8 items-center gap-2 rounded-full px-2">
+            <span className={`text-[11px] ${themeMode === "light" ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
+              亮
+            </span>
+            <Switch
+              size="2"
+              color="cyan"
+              checked={themeMode === "dark"}
+              onCheckedChange={(checked) => setThemeMode(checked ? "dark" : "light")}
+              aria-label="切换黑暗模式"
+            />
+            <span className={`text-[11px] ${themeMode === "dark" ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
+              暗
+            </span>
+          </div>
         </div>
       </div>
 

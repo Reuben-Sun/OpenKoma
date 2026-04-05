@@ -496,3 +496,27 @@
   - `手绘分镜`、`16 倍数吸附` 属于操作模式，放在工具抽屉内更合理，不必常驻画布顶部
 - 验证：
   - `npm run build` 通过
+
+## 2026-04-05 - 接入 Radix Themes 组件库并替换主题开关（增量）
+
+- 目标：
+  - 使用更成熟、观感更统一的组件库实现主题切换控件
+  - 将顶部右侧主题开关替换为组件库原生开关
+- 实现：
+  - 依赖：
+    - `package.json`
+      - 新增 `@radix-ui/themes`
+  - `src/main.tsx`
+    - 引入 `@radix-ui/themes/styles.css`
+  - `src/App.tsx`
+    - 使用 `<Theme appearance={themeMode} accentColor=\"cyan\" grayColor=\"slate\" radius=\"medium\">` 包裹应用
+  - `src/components/Toolbar.tsx`
+    - 引入并使用 `@radix-ui/themes` 的 `Switch`
+    - 主题切换由受控状态驱动：
+      - `checked = themeMode === \"dark\"`
+      - `onCheckedChange` 调用 `setThemeMode(\"dark\" | \"light\")`
+    - 去除原自绘开关结构
+  - `src/index.css`
+    - 删除不再使用的 `.theme-switch` 自定义样式块
+- 验证：
+  - `npm run build` 通过
