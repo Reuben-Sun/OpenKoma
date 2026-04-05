@@ -520,3 +520,48 @@
     - 删除不再使用的 `.theme-switch` 自定义样式块
 - 验证：
   - `npm run build` 通过
+
+## 2026-04-05 - 项目存档拆分为 layout 与 history.log（增量）
+
+- 目标：
+  - 将历史与消息从 `project.json` 中拆分出去，单独存入 `history.log`
+  - 加载时自动合并 `project.json + history.log`
+  - 兼容旧版单文件项目
+- 实现：
+  - `src/lib/store.ts`
+    - 持久化版本升级：
+      - `PROJECT_FILE_VERSION: 3 -> 4`
+    - 新增常量：
+      - `HISTORY_LOG_FILENAME = "history.log"`
+      - `HISTORY_LOG_FORMAT = "openkoma-history-log"`
+    - 目录读写改造：
+      - `readJsonFromDirectory(directory, fileName)`
+      - `tryReadJsonFromDirectory(directory, fileName)`
+      - `writeJsonToDirectory(directory, fileName, payload)`
+    - 新增拆分与合并方法：
+      - `createPersistedProjectLayoutDocument(document)`：仅布局
+      - `createPersistedHistoryLogDocument(document)`：历史与消息
+      - `mergeProjectAndHistoryDocuments(layoutRaw, historyRaw)`：加载前合并
+    - `runSaveProjectFlow`：
+      - 保存目录时同时写入：
+        - `<dir>/project.json`
+        - `<dir>/history.log`
+      - 保存提示文案更新为包含 `history.log`
+    - `loadProject`（目录模式）：
+      - 必读 `project.json`
+      - 可选读取 `history.log`
+      - 合并后走统一 `normalizeLoadedState` 解析
+  - `server/index.js`
+    - 新增 `historyLogFile` 与 temp 作用域下 `scopedHistoryLogFile`
+    - 新增存档辅助方法：
+      - `splitProjectDocumentForStorage(project)`：拆分布局与历史
+      - `mergeProjectAndHistoryForLoad(project, historyLog)`：加载时合并
+      - `readJsonFileIfExists(filePath)`：可选读取 JSON 文件
+    - `/api/project/save`：
+      - 改为同时写入 `project.json` 与 `history.log`
+    - `/api/project/load`：
+      - 读取 `project.json`，若存在则叠加 `history.log`
+    - `/api/project/temp/save`：
+      - 临时快照同样拆分保存为两个文件
+- 验证：
+  - `npm run build` 通过

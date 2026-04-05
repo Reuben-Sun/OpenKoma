@@ -129,6 +129,17 @@ type StoredProjectDocument = {
   noticeHistory?: unknown;
 };
 
+type StoredHistoryLogDocument = {
+  format?: string;
+  version?: number;
+  savedAt?: string;
+  history?: StoredHistoryPayload;
+  memories?: unknown;
+  historyPast?: unknown;
+  historyFuture?: unknown;
+  noticeHistory?: unknown;
+};
+
 type NormalizedLoadedState = {
   project: Project;
   historyPast: HistoryEntry[];
@@ -149,11 +160,32 @@ type PersistedProjectDocumentV2 = {
   memories: NoticeEntry[];
 };
 
+type PersistedProjectLayoutDocument = {
+  format: "openkoma-project";
+  version: number;
+  savedAt: string;
+  layout: Project;
+};
+
+type PersistedHistoryLogDocument = {
+  format: "openkoma-history-log";
+  version: number;
+  savedAt: string;
+  history: {
+    past: HistoryEntry[];
+    future: HistoryEntry[];
+  };
+  memories: NoticeEntry[];
+};
+
 const HISTORY_LIMIT = 80;
 const NOTICE_HISTORY_LIMIT = 300;
 const PROJECT_FILE_FORMAT = "openkoma-project";
-const PROJECT_FILE_VERSION = 3;
+const PROJECT_FILE_VERSION = 4;
+const HISTORY_LOG_FORMAT = "openkoma-history-log";
+const HISTORY_LOG_VERSION = 1;
 const PROJECT_JSON_FILENAME = "project.json";
+const HISTORY_LOG_FILENAME = "history.log";
 const THEME_STORAGE_KEY = "openkoma-theme-mode";
 
 type ProjectDirectoryPickerWindow = Window & {
@@ -261,15 +293,26 @@ function getTempProjectIdForUnsaved(
   return normalized || undefined;
 }
 
-async function readJsonFromDirectory(directory: FileSystemDirectoryHandle): Promise<unknown> {
-  const fileHandle = await directory.getFileHandle(PROJECT_JSON_FILENAME, { create: false });
+async function readJsonFromDirectory(directory: FileSystemDirectoryHandle, fileName: string): Promise<unknown> {
+  const fileHandle = await directory.getFileHandle(fileName, { create: false });
   const file = await fileHandle.getFile();
   const text = await file.text();
   return JSON.parse(text) as unknown;
 }
 
-async function writeJsonToDirectory(directory: FileSystemDirectoryHandle, payload: unknown): Promise<void> {
-  const fileHandle = await directory.getFileHandle(PROJECT_JSON_FILENAME, { create: true });
+async function tryReadJsonFromDirectory(directory: FileSystemDirectoryHandle, fileName: string): Promise<unknown | null> {
+  try {
+    return await readJsonFromDirectory(directory, fileName);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "NotFoundError") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function writeJsonToDirectory(directory: FileSystemDirectoryHandle, fileName: string, payload: unknown): Promise<void> {
+  const fileHandle = await directory.getFileHandle(fileName, { create: true });
   const writable = await fileHandle.createWritable();
   await writable.write(JSON.stringify(payload, null, 2));
   await writable.close();
@@ -719,6 +762,36 @@ function normalizeLoadedState(raw: unknown): NormalizedLoadedState | null {
   };
 }
 
+function mergeProjectAndHistoryDocuments(layoutRaw: unknown, historyRaw: unknown | null): unknown {
+  if (!isRecord(layoutRaw) || !isRecord(historyRaw)) {
+    return layoutRaw;
+  }
+
+  const historyLog = historyRaw as StoredHistoryLogDocument;
+  const merged: StoredProjectDocument = {
+    ...(layoutRaw as StoredProjectDocument)
+  };
+
+  const hasHistoryPayload = "history" in historyLog || "historyPast" in historyLog || "historyFuture" in historyLog;
+  if (hasHistoryPayload) {
+    const historyContainer = isRecord(historyLog.history) ? historyLog.history : undefined;
+    if (historyContainer) {
+      merged.history = historyContainer;
+    } else {
+      delete merged.history;
+    }
+    merged.historyPast = historyLog.historyPast;
+    merged.historyFuture = historyLog.historyFuture;
+  }
+
+  const hasNoticePayload = "memories" in historyLog || "noticeHistory" in historyLog;
+  if (hasNoticePayload) {
+    merged.memories = historyLog.memories ?? historyLog.noticeHistory;
+  }
+
+  return merged;
+}
+
 function createPersistedProjectDocument(state: Pick<EditorStore, "project" | "historyPast" | "historyFuture" | "noticeHistory">): PersistedProjectDocumentV2 {
   return {
     format: PROJECT_FILE_FORMAT,
@@ -730,6 +803,25 @@ function createPersistedProjectDocument(state: Pick<EditorStore, "project" | "hi
       future: structuredClone(state.historyFuture)
     },
     memories: structuredClone(state.noticeHistory)
+  };
+}
+
+function createPersistedProjectLayoutDocument(document: PersistedProjectDocumentV2): PersistedProjectLayoutDocument {
+  return {
+    format: document.format,
+    version: document.version,
+    savedAt: document.savedAt,
+    layout: document.layout
+  };
+}
+
+function createPersistedHistoryLogDocument(document: PersistedProjectDocumentV2): PersistedHistoryLogDocument {
+  return {
+    format: HISTORY_LOG_FORMAT,
+    version: HISTORY_LOG_VERSION,
+    savedAt: document.savedAt,
+    history: document.history,
+    memories: document.memories
   };
 }
 
@@ -1217,8 +1309,8 @@ async function runSaveProjectFlow(
       await saveProjectApi(createPersistedProjectDocument(state));
       get().setNotice(
         forcePickDirectory
-          ? "当前环境不支持另存为路径选择，已回退保存到 ./project/project.json"
-          : "当前环境不支持路径选择，已回退保存到 ./project/project.json"
+          ? "当前环境不支持另存为路径选择，已回退保存到 ./project/project.json（历史在 ./project/history.log）"
+          : "当前环境不支持路径选择，已回退保存到 ./project/project.json（历史在 ./project/history.log）"
       );
       return;
     }
@@ -1245,7 +1337,12 @@ async function runSaveProjectFlow(
       state.assetRefMap
     );
 
-    await writeJsonToDirectory(targetDirectory, materialized.document);
+    const layoutDocument = createPersistedProjectLayoutDocument(materialized.document);
+    const historyLogDocument = createPersistedHistoryLogDocument(materialized.document);
+    await Promise.all([
+      writeJsonToDirectory(targetDirectory, PROJECT_JSON_FILENAME, layoutDocument),
+      writeJsonToDirectory(targetDirectory, HISTORY_LOG_FILENAME, historyLogDocument)
+    ]);
 
     let nextProject = state.project;
     let nextHistoryPast = state.historyPast;
@@ -1294,13 +1391,13 @@ async function runSaveProjectFlow(
 
     if (materialized.unresolvedRefs.length > 0) {
       get().setNotice(
-        `项目已保存到 ${targetDirectory.name}/${PROJECT_JSON_FILENAME}，但有 ${materialized.unresolvedRefs.length} 张图片未能写入`
+        `项目已保存到 ${targetDirectory.name}/${PROJECT_JSON_FILENAME}（历史在 ${HISTORY_LOG_FILENAME}），但有 ${materialized.unresolvedRefs.length} 张图片未能写入`
       );
     } else {
       get().setNotice(
         forcePickDirectory
-          ? `项目已另存为 ${targetDirectory.name}/${PROJECT_JSON_FILENAME}`
-          : `项目已保存到 ${targetDirectory.name}/${PROJECT_JSON_FILENAME}`
+          ? `项目已另存为 ${targetDirectory.name}/${PROJECT_JSON_FILENAME}（历史在 ${HISTORY_LOG_FILENAME}）`
+          : `项目已保存到 ${targetDirectory.name}/${PROJECT_JSON_FILENAME}（历史在 ${HISTORY_LOG_FILENAME}）`
       );
     }
   } catch (error) {
@@ -2215,8 +2312,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         return;
       }
 
-      const loaded = await readJsonFromDirectory(selectedDirectory);
-      const normalized = normalizeLoadedState(loaded);
+      const loadedProject = await readJsonFromDirectory(selectedDirectory, PROJECT_JSON_FILENAME);
+      const loadedHistoryLog = await tryReadJsonFromDirectory(selectedDirectory, HISTORY_LOG_FILENAME);
+      const normalized = normalizeLoadedState(mergeProjectAndHistoryDocuments(loadedProject, loadedHistoryLog));
       if (!normalized) {
         get().setNotice("项目数据格式无效");
         return;

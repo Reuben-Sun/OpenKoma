@@ -14,7 +14,10 @@ const rootDir = process.cwd();
 const projectDir = path.join(rootDir, "project");
 const imageDir = path.join(projectDir, "images");
 const projectFile = path.join(projectDir, "project.json");
+const historyLogFile = path.join(projectDir, "history.log");
 const tempRootDir = path.join(projectDir, "temp");
+const HISTORY_LOG_FORMAT = "openkoma-history-log";
+const HISTORY_LOG_VERSION = 1;
 
 await Promise.all([fs.mkdir(imageDir, { recursive: true }), fs.mkdir(tempRootDir, { recursive: true })]);
 
@@ -61,6 +64,7 @@ function resolveScopedPaths(tempProjectId) {
       scopedImageDir: imageDir,
       imageUrlPrefix: "/assets/images",
       scopedProjectFile: projectFile,
+      scopedHistoryLogFile: historyLogFile,
       safeProjectId: null
     };
   }
@@ -71,8 +75,96 @@ function resolveScopedPaths(tempProjectId) {
     scopedImageDir: path.join(scopedProjectDir, "images"),
     imageUrlPrefix: `/assets/temp/${safeProjectId}/images`,
     scopedProjectFile: path.join(scopedProjectDir, "project.json"),
+    scopedHistoryLogFile: path.join(scopedProjectDir, "history.log"),
     safeProjectId
   };
+}
+
+function isRecord(value) {
+  return typeof value === "object" && value !== null;
+}
+
+function toArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function splitProjectDocumentForStorage(project) {
+  if (!isRecord(project)) {
+    return {
+      layoutDocument: project,
+      historyDocument: {
+        format: HISTORY_LOG_FORMAT,
+        version: HISTORY_LOG_VERSION,
+        savedAt: new Date().toISOString(),
+        history: {
+          past: [],
+          future: []
+        },
+        memories: []
+      }
+    };
+  }
+
+  const layoutDocument = { ...project };
+  delete layoutDocument.history;
+  delete layoutDocument.historyPast;
+  delete layoutDocument.historyFuture;
+  delete layoutDocument.memories;
+  delete layoutDocument.noticeHistory;
+
+  const historyContainer = isRecord(project.history) ? project.history : undefined;
+  const historyDocument = {
+    format: HISTORY_LOG_FORMAT,
+    version: HISTORY_LOG_VERSION,
+    savedAt: typeof project.savedAt === "string" ? project.savedAt : new Date().toISOString(),
+    history: {
+      past: toArray(historyContainer?.past ?? project.historyPast),
+      future: toArray(historyContainer?.future ?? project.historyFuture)
+    },
+    memories: toArray(project.memories ?? project.noticeHistory)
+  };
+
+  return {
+    layoutDocument,
+    historyDocument
+  };
+}
+
+function mergeProjectAndHistoryForLoad(project, historyLog) {
+  if (!isRecord(project) || !isRecord(historyLog)) {
+    return project;
+  }
+
+  const merged = { ...project };
+  const hasHistoryPayload = "history" in historyLog || "historyPast" in historyLog || "historyFuture" in historyLog;
+  if (hasHistoryPayload) {
+    const historyContainer = isRecord(historyLog.history) ? historyLog.history : undefined;
+    if (historyContainer) {
+      merged.history = historyContainer;
+    } else {
+      delete merged.history;
+    }
+    merged.historyPast = historyLog.historyPast;
+    merged.historyFuture = historyLog.historyFuture;
+  }
+
+  if ("memories" in historyLog || "noticeHistory" in historyLog) {
+    merged.memories = historyLog.memories ?? historyLog.noticeHistory;
+  }
+
+  return merged;
+}
+
+async function readJsonFileIfExists(filePath) {
+  try {
+    const raw = await fs.readFile(filePath, "utf8");
+    return JSON.parse(raw);
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
 }
 
 function createPlaceholderSvg(prompt, width, height) {
@@ -245,8 +337,12 @@ app.post("/api/project/save", async (request, response) => {
       return;
     }
 
+    const { layoutDocument, historyDocument } = splitProjectDocumentForStorage(project);
     await fs.mkdir(projectDir, { recursive: true });
-    await fs.writeFile(projectFile, JSON.stringify(project, null, 2), "utf8");
+    await Promise.all([
+      fs.writeFile(projectFile, JSON.stringify(layoutDocument, null, 2), "utf8"),
+      fs.writeFile(historyLogFile, JSON.stringify(historyDocument, null, 2), "utf8")
+    ]);
 
     response.json({ ok: true });
   } catch (error) {
@@ -258,7 +354,9 @@ app.post("/api/project/save", async (request, response) => {
 app.get("/api/project/load", async (_request, response) => {
   try {
     const raw = await fs.readFile(projectFile, "utf8");
-    const project = JSON.parse(raw);
+    const layout = JSON.parse(raw);
+    const historyLog = await readJsonFileIfExists(historyLogFile);
+    const project = mergeProjectAndHistoryForLoad(layout, historyLog);
     response.json({ project });
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
@@ -285,8 +383,12 @@ app.post("/api/project/temp/save", async (request, response) => {
       return;
     }
 
+    const { layoutDocument, historyDocument } = splitProjectDocumentForStorage(project);
     await fs.mkdir(scoped.scopedProjectDir, { recursive: true });
-    await fs.writeFile(scoped.scopedProjectFile, JSON.stringify(project, null, 2), "utf8");
+    await Promise.all([
+      fs.writeFile(scoped.scopedProjectFile, JSON.stringify(layoutDocument, null, 2), "utf8"),
+      fs.writeFile(scoped.scopedHistoryLogFile, JSON.stringify(historyDocument, null, 2), "utf8")
+    ]);
     response.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "临时项目保存失败";
