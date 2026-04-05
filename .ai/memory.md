@@ -442,3 +442,35 @@
       - `POST /api/project/temp/clear`
 - 验证：
   - `npm run build` 通过
+
+## 2026-04-05 - 顶部右侧新增黑暗模式开关（增量）
+
+- 目标：
+  - 在最顶部右侧增加一个“黑暗模式”开关按钮
+  - 点击后全局 UI 可以在深色/浅色主题之间切换
+  - 主题选择在刷新后保持
+- 实现：
+  - `src/lib/store.ts`
+    - 新增主题状态：
+      - `themeMode: "dark" | "light"`
+    - 新增主题动作：
+      - `setThemeMode(mode)`
+      - `toggleThemeMode()`
+    - 新增本地持久化：
+      - `localStorage` 键：`openkoma-theme-mode`
+      - 首次初始化优先读取本地值，否则按系统 `prefers-color-scheme` 推断
+    - 切换主题时发出消息：
+      - `已切换为黑暗模式`
+      - `已切换为明亮模式`
+  - `src/components/Toolbar.tsx`
+    - 顶栏右侧工具分组旁新增主题开关按钮
+    - 按当前主题显示文案（黑暗模式/明亮模式）并可一键切换
+  - `src/App.tsx`
+    - 监听 `themeMode`，将 `data-theme` 写入 `document.documentElement`
+    - 消息栏文本颜色改为主题变量，避免浅色模式下对比度不足
+  - `src/index.css`
+    - 新增 `:root[data-theme=\"light\"]` 变量覆盖
+    - 为 `body` 背景、网格遮罩、滚动条、面板/输入框/按钮/工作区等提供浅色模式样式
+    - 保持默认深色主题视觉不变
+- 验证：
+  - `npm run build` 通过

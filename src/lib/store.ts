@@ -33,12 +33,15 @@ export type NoticeEntry = {
   timestamp: number;
 };
 
+export type ThemeMode = "dark" | "light";
+
 type EditorStore = {
   project: Project;
   projectDirectoryHandle?: FileSystemDirectoryHandle;
   projectDirectoryName?: string;
   assetRefMap: Record<string, string>;
   transientObjectUrls: string[];
+  themeMode: ThemeMode;
   selection?: Selection;
   manualPanelMode: boolean;
   snapSizeTo16: boolean;
@@ -54,6 +57,8 @@ type EditorStore = {
   notice?: string;
 
   setNotice: (notice?: string) => void;
+  setThemeMode: (mode: ThemeMode) => void;
+  toggleThemeMode: () => void;
 
   undo: () => void;
   redo: () => void;
@@ -149,6 +154,7 @@ const NOTICE_HISTORY_LIMIT = 300;
 const PROJECT_FILE_FORMAT = "openkoma-project";
 const PROJECT_FILE_VERSION = 3;
 const PROJECT_JSON_FILENAME = "project.json";
+const THEME_STORAGE_KEY = "openkoma-theme-mode";
 
 type ProjectDirectoryPickerWindow = Window & {
   showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle>;
@@ -176,6 +182,46 @@ function hasDirectoryPicker(): boolean {
   }
   const picker = (window as ProjectDirectoryPickerWindow).showDirectoryPicker;
   return typeof picker === "function";
+}
+
+function normalizeThemeMode(value: unknown): ThemeMode | undefined {
+  if (value === "dark" || value === "light") {
+    return value;
+  }
+  return undefined;
+}
+
+function getInitialThemeMode(): ThemeMode {
+  if (typeof window === "undefined") {
+    return "dark";
+  }
+
+  try {
+    const stored = normalizeThemeMode(window.localStorage.getItem(THEME_STORAGE_KEY));
+    if (stored) {
+      return stored;
+    }
+  } catch {
+    // ignored
+  }
+
+  if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    return "dark";
+  }
+
+  return "light";
+}
+
+function persistThemeMode(mode: ThemeMode) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, mode);
+  } catch {
+    // ignored
+  }
 }
 
 async function pickProjectDirectory(): Promise<FileSystemDirectoryHandle | null> {
@@ -1276,6 +1322,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   projectDirectoryName: undefined,
   assetRefMap: {},
   transientObjectUrls: [],
+  themeMode: getInitialThemeMode(),
   selection: undefined,
   manualPanelMode: false,
   snapSizeTo16: false,
@@ -1294,6 +1341,31 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     set((state) => ({
       ...withNotice(state, notice)
     }));
+  },
+
+  setThemeMode: (mode) => {
+    set((state) => {
+      if (state.themeMode === mode) {
+        return state;
+      }
+
+      persistThemeMode(mode);
+      return {
+        themeMode: mode,
+        ...withNotice(state, mode === "dark" ? "已切换为黑暗模式" : "已切换为明亮模式")
+      };
+    });
+  },
+
+  toggleThemeMode: () => {
+    set((state) => {
+      const nextMode: ThemeMode = state.themeMode === "dark" ? "light" : "dark";
+      persistThemeMode(nextMode);
+      return {
+        themeMode: nextMode,
+        ...withNotice(state, nextMode === "dark" ? "已切换为黑暗模式" : "已切换为明亮模式")
+      };
+    });
   },
 
   undo: () => {

@@ -34,6 +34,7 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
   const selection = useEditorStore((state) => state.selection);
   const manualPanelMode = useEditorStore((state) => state.manualPanelMode);
   const snapSizeTo16 = useEditorStore((state) => state.snapSizeTo16);
+  const themeMode = useEditorStore((state) => state.themeMode);
   const busy = useEditorStore((state) => state.busy);
   const historyPastCount = useEditorStore((state) => state.historyPast.length);
   const historyFutureCount = useEditorStore((state) => state.historyFuture.length);
@@ -48,6 +49,7 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
   const splitSelectedPanel = useEditorStore((state) => state.splitSelectedPanel);
   const toggleManualPanelMode = useEditorStore((state) => state.toggleManualPanelMode);
   const toggleSnapSizeTo16 = useEditorStore((state) => state.toggleSnapSizeTo16);
+  const toggleThemeMode = useEditorStore((state) => state.toggleThemeMode);
   const addBubble = useEditorStore((state) => state.addBubble);
   const saveProject = useEditorStore((state) => state.saveProject);
   const saveProjectAs = useEditorStore((state) => state.saveProjectAs);
@@ -157,6 +159,16 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
               {categoryTitleMap[category]}
             </button>
           ))}
+          <button
+            type="button"
+            aria-label="切换黑暗模式"
+            aria-pressed={themeMode === "dark"}
+            className={`${compactButtonClass} ${themeMode === "dark" ? "studio-btn-primary" : ""}`}
+            onClick={() => toggleThemeMode()}
+            title={themeMode === "dark" ? "切换为明亮模式" : "切换为黑暗模式"}
+          >
+            {themeMode === "dark" ? "黑暗模式" : "明亮模式"}
+          </button>
         </div>
       </div>
 

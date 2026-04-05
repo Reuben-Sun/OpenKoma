@@ -8,6 +8,7 @@ import { getActivePage, useEditorStore } from "./lib/store";
 export default function App() {
   const project = useEditorStore((state) => state.project);
   const activePage = useEditorStore((state) => getActivePage(state.project));
+  const themeMode = useEditorStore((state) => state.themeMode);
   const notice = useEditorStore((state) => state.notice);
   const noticeHistory = useEditorStore((state) => state.noticeHistory);
   const undo = useEditorStore((state) => state.undo);
@@ -70,6 +71,13 @@ export default function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [deleteSelection, redo, undo]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+    document.documentElement.dataset.theme = themeMode;
+  }, [themeMode]);
 
   useEffect(() => {
     if (!historyOpen) {
@@ -149,7 +157,7 @@ export default function App() {
                 onClick={() => setHistoryOpen((open) => !open)}
                 title={notice ?? "暂无消息"}
               >
-                <span className="truncate text-xs text-cyan-100">{notice ?? "准备就绪"}</span>
+                <span className="truncate text-xs text-[var(--text-primary)]">{notice ?? "准备就绪"}</span>
                 <span className="text-[10px] text-[var(--text-secondary)]">{historyOpen ? "收起" : "历史"}</span>
               </button>
             </div>
