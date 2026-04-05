@@ -21,6 +21,27 @@ type CropDraft = {
   height: number;
 };
 
+type Point = {
+  x: number;
+  y: number;
+};
+
+type ResizeEdge = "left" | "right" | "top" | "bottom";
+
+type CropDragState =
+  | {
+      kind: "move";
+      pointerId: number;
+      startPoint: Point;
+      startCrop: CropDraft;
+    }
+  | {
+      kind: "resize";
+      pointerId: number;
+      edge: ResizeEdge;
+      startCrop: CropDraft;
+    };
+
 function clamp(value: number, min: number, max: number): number {
   if (Number.isNaN(value)) {
     return min;
@@ -83,46 +104,186 @@ function normalizeCropToRatio(
   };
 }
 
-function createCropFromPointsWithRatio(
-  start: { x: number; y: number },
-  end: { x: number; y: number },
+function moveCropWithinBounds(
+  crop: CropDraft,
+  deltaX: number,
+  deltaY: number,
+  naturalWidth: number,
+  naturalHeight: number
+): CropDraft {
+  return {
+    x: clamp(crop.x + deltaX, 0, Math.max(0, naturalWidth - crop.width)),
+    y: clamp(crop.y + deltaY, 0, Math.max(0, naturalHeight - crop.height)),
+    width: crop.width,
+    height: crop.height
+  };
+}
+
+function resizeCropFromEdgeWithRatio(
+  initial: CropDraft,
+  edge: ResizeEdge,
+  point: Point,
   naturalWidth: number,
   naturalHeight: number,
   ratio: number
 ): CropDraft {
   const safeRatio = Math.max(0.001, ratio);
-  const directionX = end.x >= start.x ? 1 : -1;
-  const directionY = end.y >= start.y ? 1 : -1;
-  const maxWidth = directionX > 0 ? naturalWidth - start.x : start.x;
-  const maxHeight = directionY > 0 ? naturalHeight - start.y : start.y;
+  const safeWidth = Math.max(1, naturalWidth);
+  const safeHeight = Math.max(1, naturalHeight);
 
-  let width = Math.abs(end.x - start.x);
-  let height = Math.abs(end.y - start.y);
+  if (edge === "left" || edge === "right") {
+    const anchorX = edge === "left" ? initial.x + initial.width : initial.x;
+    const centerY = initial.y + initial.height / 2;
+    const maxWidthByHorizontal = edge === "left" ? anchorX : safeWidth - anchorX;
+    const maxHalfHeight = Math.min(centerY, safeHeight - centerY);
+    const maxWidthByVertical = maxHalfHeight * 2 * safeRatio;
+    const maxWidth = Math.max(1, Math.min(maxWidthByHorizontal, maxWidthByVertical));
 
-  if (width < 1 && height < 1) {
-    width = safeRatio >= 1 ? safeRatio : 1;
-    height = safeRatio >= 1 ? 1 : 1 / safeRatio;
-  } else if (width / Math.max(height, 0.001) >= safeRatio) {
-    height = width / safeRatio;
-  } else {
-    width = height * safeRatio;
+    let width = edge === "left" ? anchorX - point.x : point.x - anchorX;
+    width = clamp(width, 1, maxWidth);
+    const height = width / safeRatio;
+    const x = edge === "left" ? anchorX - width : anchorX;
+    const y = clamp(centerY - height / 2, 0, Math.max(0, safeHeight - height));
+    return {
+      x: clamp(x, 0, Math.max(0, safeWidth - width)),
+      y,
+      width,
+      height
+    };
   }
 
-  const fitScale = Math.min(1, maxWidth / Math.max(width, 1), maxHeight / Math.max(height, 1));
-  width = Math.max(1, width * fitScale);
-  height = Math.max(1, height * fitScale);
+  const anchorY = edge === "top" ? initial.y + initial.height : initial.y;
+  const centerX = initial.x + initial.width / 2;
+  const maxHeightByVertical = edge === "top" ? anchorY : safeHeight - anchorY;
+  const maxHalfWidth = Math.min(centerX, safeWidth - centerX);
+  const maxHeightByHorizontal = (maxHalfWidth * 2) / safeRatio;
+  const maxHeight = Math.max(1, Math.min(maxHeightByVertical, maxHeightByHorizontal));
 
-  let x = directionX > 0 ? start.x : start.x - width;
-  let y = directionY > 0 ? start.y : start.y - height;
-
-  x = clamp(x, 0, naturalWidth - width);
-  y = clamp(y, 0, naturalHeight - height);
-
+  let height = edge === "top" ? anchorY - point.y : point.y - anchorY;
+  height = clamp(height, 1, maxHeight);
+  const width = height * safeRatio;
+  const y = edge === "top" ? anchorY - height : anchorY;
+  const x = clamp(centerX - width / 2, 0, Math.max(0, safeWidth - width));
   return {
     x,
-    y,
+    y: clamp(y, 0, Math.max(0, safeHeight - height)),
     width,
     height
+  };
+}
+
+function toNaturalPoint(
+  event: PointerEvent<HTMLElement>,
+  overlayElement: HTMLDivElement | null,
+  scale: number,
+  naturalWidth: number,
+  naturalHeight: number
+): Point {
+  if (!overlayElement) {
+    return {
+      x: 0,
+      y: 0
+    };
+  }
+
+  const rect = overlayElement.getBoundingClientRect();
+  return {
+    x: clamp((event.clientX - rect.left) / scale, 0, naturalWidth),
+    y: clamp((event.clientY - rect.top) / scale, 0, naturalHeight)
+  };
+}
+
+function isMainPointer(event: PointerEvent<HTMLElement>) {
+  if (event.pointerType === "touch") {
+    return true;
+  }
+  return event.button === 0;
+}
+
+function beginPointerCapture(overlay: HTMLDivElement | null, pointerId: number) {
+  if (!overlay || overlay.hasPointerCapture(pointerId)) {
+    return;
+  }
+  overlay.setPointerCapture(pointerId);
+}
+
+function endPointerCapture(overlay: HTMLDivElement | null, pointerId: number) {
+  if (!overlay || !overlay.hasPointerCapture(pointerId)) {
+    return;
+  }
+  overlay.releasePointerCapture(pointerId);
+}
+
+function getHandleCursor(edge: ResizeEdge) {
+  if (edge === "left" || edge === "right") {
+    return "ew-resize";
+  }
+  return "ns-resize";
+}
+
+function cropHandleClass(edge: ResizeEdge) {
+  if (edge === "left") {
+    return "absolute bottom-2 left-0 top-2 w-4 -translate-x-1/2";
+  }
+  if (edge === "right") {
+    return "absolute bottom-2 right-0 top-2 w-4 translate-x-1/2";
+  }
+  if (edge === "top") {
+    return "absolute left-2 right-2 top-0 h-4 -translate-y-1/2";
+  }
+  return "absolute bottom-0 left-2 right-2 h-4 translate-y-1/2";
+}
+
+function cropHandleGuideClass(edge: ResizeEdge) {
+  if (edge === "left" || edge === "right") {
+    return "mx-auto h-full w-0.5 bg-blue-300/90";
+  }
+  return "my-auto h-0.5 w-full bg-blue-300/90";
+}
+
+function CropEdgeHandle({
+  edge,
+  onPointerDown
+}: {
+  edge: ResizeEdge;
+  onPointerDown: (event: PointerEvent<HTMLDivElement>) => void;
+}) {
+  return (
+    <div
+      className={`${cropHandleClass(edge)}`}
+      style={{ cursor: getHandleCursor(edge) }}
+      onPointerDown={(event) => {
+        event.stopPropagation();
+        onPointerDown(event);
+      }}
+    >
+      <div className={cropHandleGuideClass(edge)} />
+    </div>
+  );
+}
+
+function updateDraftForDragState(
+  dragState: CropDragState,
+  point: Point,
+  naturalWidth: number,
+  naturalHeight: number,
+  frameRatio: number
+): CropDraft {
+  if (dragState.kind === "move") {
+    const deltaX = point.x - dragState.startPoint.x;
+    const deltaY = point.y - dragState.startPoint.y;
+    return moveCropWithinBounds(dragState.startCrop, deltaX, deltaY, naturalWidth, naturalHeight);
+  }
+
+  return resizeCropFromEdgeWithRatio(dragState.startCrop, dragState.edge, point, naturalWidth, naturalHeight, frameRatio);
+}
+
+function createScaledStyle(draft: CropDraft, scale: number) {
+  return {
+    left: draft.x * scale,
+    top: draft.y * scale,
+    width: Math.max(1, draft.width * scale),
+    height: Math.max(1, draft.height * scale)
   };
 }
 
@@ -197,14 +358,15 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
   );
 
   const [draft, setDraft] = useState<CropDraft>(initialCrop);
-  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
+  const [dragState, setDragState] = useState<CropDragState | null>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!open) {
       return;
     }
     setDraft(initialCrop);
-    setDragStart(null);
+    setDragState(null);
   }, [initialCrop, open]);
 
   if (!open || !panel.image?.original) {
@@ -215,49 +377,79 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
   const displayWidth = Math.max(1, Math.round(naturalWidth * scale));
   const displayHeight = Math.max(1, Math.round(naturalHeight * scale));
 
-  const toNaturalPoint = (event: PointerEvent<HTMLDivElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = clamp((event.clientX - rect.left) / scale, 0, naturalWidth);
-    const y = clamp((event.clientY - rect.top) / scale, 0, naturalHeight);
-    return { x, y };
-  };
+  const toPoint = (event: PointerEvent<HTMLElement>) =>
+    toNaturalPoint(event, overlayRef.current, scale, naturalWidth, naturalHeight);
 
-  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) {
+  const startMove = (event: PointerEvent<HTMLDivElement>) => {
+    if (!isMainPointer(event)) {
       return;
     }
 
-    const rawPoint = toNaturalPoint(event);
-    const point = {
-      x: clamp(rawPoint.x, 0, Math.max(0, naturalWidth - 1)),
-      y: clamp(rawPoint.y, 0, Math.max(0, naturalHeight - 1))
+    event.preventDefault();
+    const point = toPoint(event);
+    setDragState({
+      kind: "move",
+      pointerId: event.pointerId,
+      startPoint: point,
+      startCrop: draft
+    });
+    beginPointerCapture(overlayRef.current, event.pointerId);
+  };
+
+  const startResize = (edge: ResizeEdge) => (event: PointerEvent<HTMLDivElement>) => {
+    if (!isMainPointer(event)) {
+      return;
+    }
+
+    event.preventDefault();
+    const point = toPoint(event);
+    const nextDragState: CropDragState = {
+      kind: "resize",
+      pointerId: event.pointerId,
+      edge,
+      startCrop: draft
     };
-    setDragStart(point);
-    setDraft(createCropFromPointsWithRatio(point, point, naturalWidth, naturalHeight, frameRatio));
-    event.currentTarget.setPointerCapture(event.pointerId);
+    setDraft(updateDraftForDragState(nextDragState, point, naturalWidth, naturalHeight, frameRatio));
+    setDragState(nextDragState);
+    beginPointerCapture(overlayRef.current, event.pointerId);
   };
 
-  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    if (!dragStart) {
+  const onOverlayPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    if (!dragState || dragState.pointerId !== event.pointerId) {
       return;
     }
 
-    const point = toNaturalPoint(event);
-    setDraft(createCropFromPointsWithRatio(dragStart, point, naturalWidth, naturalHeight, frameRatio));
+    event.preventDefault();
+    const point = toPoint(event);
+    setDraft(updateDraftForDragState(dragState, point, naturalWidth, naturalHeight, frameRatio));
   };
 
-  const onPointerUp = (event: PointerEvent<HTMLDivElement>) => {
-    if (!dragStart) {
+  const stopDrag = (pointerId: number) => {
+    endPointerCapture(overlayRef.current, pointerId);
+    setDragState((current) => {
+      if (!current || current.pointerId !== pointerId) {
+        return current;
+      }
+      return null;
+    });
+  };
+
+  const onOverlayPointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    if (!dragState || dragState.pointerId !== event.pointerId) {
       return;
     }
 
-    const point = toNaturalPoint(event);
-    setDraft(createCropFromPointsWithRatio(dragStart, point, naturalWidth, naturalHeight, frameRatio));
-    setDragStart(null);
+    event.preventDefault();
+    const point = toPoint(event);
+    setDraft(updateDraftForDragState(dragState, point, naturalWidth, naturalHeight, frameRatio));
+    stopDrag(event.pointerId);
+  };
 
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+  const onOverlayPointerCancel = (event: PointerEvent<HTMLDivElement>) => {
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
     }
+    stopDrag(event.pointerId);
   };
 
   const applyCrop = () => {
@@ -282,7 +474,7 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
         </div>
 
         <p className="mt-2 text-xs text-slate-400">
-          拖拽框选要保留的区域。裁剪框比例固定为分镜比例 {frameRatioText}，原图会保留在本地。
+          拖动框内可移动裁剪区域，拖动四条边可缩放。裁剪框比例固定为分镜比例 {frameRatioText}，原图会保留在本地。
         </p>
 
         <div
@@ -298,20 +490,22 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
           />
 
           <div
-            className="absolute inset-0 cursor-crosshair"
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
+            ref={overlayRef}
+            className="absolute inset-0 touch-none"
+            onPointerMove={onOverlayPointerMove}
+            onPointerUp={onOverlayPointerUp}
+            onPointerCancel={onOverlayPointerCancel}
           >
             <div
               className="absolute border-2 border-blue-400 bg-blue-500/20"
-              style={{
-                left: draft.x * scale,
-                top: draft.y * scale,
-                width: Math.max(1, draft.width * scale),
-                height: Math.max(1, draft.height * scale)
-              }}
-            />
+              style={createScaledStyle(draft, scale)}
+              onPointerDown={startMove}
+            >
+              <CropEdgeHandle edge="left" onPointerDown={startResize("left")} />
+              <CropEdgeHandle edge="right" onPointerDown={startResize("right")} />
+              <CropEdgeHandle edge="top" onPointerDown={startResize("top")} />
+              <CropEdgeHandle edge="bottom" onPointerDown={startResize("bottom")} />
+            </div>
           </div>
         </div>
 

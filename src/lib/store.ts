@@ -113,16 +113,74 @@ function sanitizePanel(panel: Panel): Panel {
   };
 }
 
+function getPanelFrameRatio(panel: Pick<Panel, "width" | "height" | "gap">): number {
+  const innerWidth = Math.max(1, panel.width - panel.gap * 2);
+  const innerHeight = Math.max(1, panel.height - panel.gap * 2);
+  return innerWidth / innerHeight;
+}
+
+function normalizeCropToRatio(
+  crop: CropConfig,
+  naturalWidth: number,
+  naturalHeight: number,
+  ratio: number
+): CropConfig {
+  const safeRatio = Math.max(0.001, ratio);
+  let width = clamp(crop.width, 1, naturalWidth);
+  let height = clamp(crop.height, 1, naturalHeight);
+  const centerX = crop.x + width / 2;
+  const centerY = crop.y + height / 2;
+
+  if (width / Math.max(height, 0.001) >= safeRatio) {
+    height = width / safeRatio;
+  } else {
+    width = height * safeRatio;
+  }
+
+  const fitScale = Math.min(1, naturalWidth / Math.max(width, 1), naturalHeight / Math.max(height, 1));
+  width = Math.max(1, width * fitScale);
+  height = Math.max(1, height * fitScale);
+
+  return {
+    x: clamp(centerX - width / 2, 0, Math.max(0, naturalWidth - width)),
+    y: clamp(centerY - height / 2, 0, Math.max(0, naturalHeight - height)),
+    width,
+    height,
+    scale: clamp(crop.scale, 0.1, 4)
+  };
+}
+
 function replacePanel(panels: Panel[], id: string, patch: Partial<Panel>): Panel[] {
   return panels.map((panel) => {
     if (panel.id !== id) {
       return panel;
     }
-    return sanitizePanel({
+
+    const nextPanel = sanitizePanel({
       ...panel,
       ...patch,
       image: patch.image === undefined ? panel.image : patch.image
     });
+
+    if (!nextPanel.image?.crop) {
+      return nextPanel;
+    }
+
+    const previousRatio = getPanelFrameRatio(panel);
+    const nextRatio = getPanelFrameRatio(nextPanel);
+    if (Math.abs(previousRatio - nextRatio) < 0.000001) {
+      return nextPanel;
+    }
+
+    const naturalWidth = Math.max(1, nextPanel.image.naturalWidth ?? nextPanel.width);
+    const naturalHeight = Math.max(1, nextPanel.image.naturalHeight ?? nextPanel.height);
+    return {
+      ...nextPanel,
+      image: {
+        ...nextPanel.image,
+        crop: normalizeCropToRatio(nextPanel.image.crop, naturalWidth, naturalHeight, nextRatio)
+      }
+    };
   });
 }
 
@@ -596,14 +654,16 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         return state;
       }
 
-      const naturalWidth = panel.image.naturalWidth ?? panel.width;
-      const naturalHeight = panel.image.naturalHeight ?? panel.height;
+      const naturalWidth = Math.max(1, panel.image.naturalWidth ?? panel.width);
+      const naturalHeight = Math.max(1, panel.image.naturalHeight ?? panel.height);
+      const width = clamp(crop.width, 1, naturalWidth);
+      const height = clamp(crop.height, 1, naturalHeight);
 
       const nextCrop: CropConfig = {
-        x: clamp(crop.x, 0, naturalWidth),
-        y: clamp(crop.y, 0, naturalHeight),
-        width: clamp(crop.width, 1, naturalWidth),
-        height: clamp(crop.height, 1, naturalHeight),
+        x: clamp(crop.x, 0, Math.max(0, naturalWidth - width)),
+        y: clamp(crop.y, 0, Math.max(0, naturalHeight - height)),
+        width,
+        height,
         scale: clamp(crop.scale, 0.1, 4)
       };
 
