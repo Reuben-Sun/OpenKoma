@@ -19,6 +19,13 @@ type HistoryEntry = {
   message: string;
 };
 
+export type NoticeEntry = {
+  id: string;
+  text: string;
+  time: string;
+  timestamp: number;
+};
+
 type EditorStore = {
   project: Project;
   selection?: Selection;
@@ -26,6 +33,7 @@ type EditorStore = {
   snapSizeTo16: boolean;
   historyPast: HistoryEntry[];
   historyFuture: HistoryEntry[];
+  noticeHistory: NoticeEntry[];
   busy: {
     generatingPanelId?: string;
     uploadingPanelId?: string;
@@ -86,10 +94,55 @@ type LegacyProject = {
   activePageId?: string;
 };
 
+type StoredHistoryPayload = {
+  past?: unknown;
+  future?: unknown;
+};
+
+type StoredProjectDocument = {
+  format?: string;
+  version?: number;
+  savedAt?: string;
+  layout?: LegacyProject;
+  history?: StoredHistoryPayload;
+  memories?: unknown;
+  project?: LegacyProject;
+  historyPast?: unknown;
+  historyFuture?: unknown;
+  noticeHistory?: unknown;
+};
+
+type NormalizedLoadedState = {
+  project: Project;
+  historyPast: HistoryEntry[];
+  historyFuture: HistoryEntry[];
+  noticeHistory: NoticeEntry[];
+  source: "legacy" | "v2";
+};
+
+type PersistedProjectDocumentV2 = {
+  format: "openkoma-project";
+  version: 2;
+  savedAt: string;
+  layout: Project;
+  history: {
+    past: HistoryEntry[];
+    future: HistoryEntry[];
+  };
+  memories: NoticeEntry[];
+};
+
 const HISTORY_LIMIT = 80;
+const NOTICE_HISTORY_LIMIT = 300;
+const PROJECT_FILE_FORMAT = "openkoma-project";
+const PROJECT_FILE_VERSION = 2;
 
 function cloneProject(project: Project): Project {
   return structuredClone(project);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function normalizeHistoryMessage(message: string | undefined): string {
@@ -117,8 +170,195 @@ function applyHistory(project: Project, operations: Operation[]): Project {
   return applyPatch(cloneProject(project), operations, false, true).newDocument as Project;
 }
 
+function normalizeNoticeText(notice: string | undefined): string | undefined {
+  const trimmed = notice?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+function formatNoticeTime(timestamp: number): string {
+  const date = new Date(timestamp);
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}:${String(
+    date.getSeconds()
+  ).padStart(2, "0")}`;
+}
+
+function createNoticeEntry(text: string, timestamp = Date.now()): NoticeEntry {
+  const safeTimestamp = Number.isFinite(timestamp) && timestamp > 0 ? Math.round(timestamp) : Date.now();
+  return {
+    id: `${safeTimestamp}-${Math.random().toString(36).slice(2, 10)}`,
+    text,
+    time: formatNoticeTime(safeTimestamp),
+    timestamp: safeTimestamp
+  };
+}
+
+function appendNoticeToHistory(noticeHistory: NoticeEntry[], notice: string | undefined): NoticeEntry[] {
+  const normalized = normalizeNoticeText(notice);
+  if (!normalized) {
+    return noticeHistory;
+  }
+  return [createNoticeEntry(normalized), ...noticeHistory].slice(0, NOTICE_HISTORY_LIMIT);
+}
+
+function withNotice(state: Pick<EditorStore, "noticeHistory">, notice: string | undefined) {
+  const normalized = normalizeNoticeText(notice);
+  return {
+    notice: normalized,
+    noticeHistory: appendNoticeToHistory(state.noticeHistory, normalized)
+  };
+}
+
+function sanitizeOperation(operation: unknown): Operation | null {
+  if (!isRecord(operation)) {
+    return null;
+  }
+  if (typeof operation.op !== "string" || typeof operation.path !== "string") {
+    return null;
+  }
+  const normalized: Record<string, unknown> = {
+    op: operation.op,
+    path: operation.path
+  };
+  if ("value" in operation) {
+    normalized.value = operation.value;
+  }
+  if (typeof operation.from === "string") {
+    normalized.from = operation.from;
+  }
+  return normalized as unknown as Operation;
+}
+
+function sanitizeHistoryEntries(entries: unknown): HistoryEntry[] {
+  if (!Array.isArray(entries)) {
+    return [];
+  }
+
+  const output: HistoryEntry[] = [];
+  for (const entry of entries) {
+    if (!isRecord(entry)) {
+      continue;
+    }
+
+    const forward = Array.isArray(entry.forward)
+      ? entry.forward.map((operation) => sanitizeOperation(operation)).filter((operation): operation is Operation => Boolean(operation))
+      : [];
+    const backward = Array.isArray(entry.backward)
+      ? entry.backward.map((operation) => sanitizeOperation(operation)).filter((operation): operation is Operation => Boolean(operation))
+      : [];
+    if (forward.length === 0 || backward.length === 0) {
+      continue;
+    }
+
+    output.push({
+      forward,
+      backward,
+      message: normalizeHistoryMessage(typeof entry.message === "string" ? entry.message : undefined)
+    });
+  }
+
+  return output;
+}
+
+function sanitizeNoticeHistory(input: unknown): NoticeEntry[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  const output: NoticeEntry[] = [];
+  for (const entry of input) {
+    if (!isRecord(entry)) {
+      continue;
+    }
+
+    const text = normalizeNoticeText(
+      typeof entry.text === "string" ? entry.text : typeof entry.message === "string" ? entry.message : undefined
+    );
+    if (!text) {
+      continue;
+    }
+
+    const rawTimestamp =
+      typeof entry.timestamp === "number"
+        ? entry.timestamp
+        : typeof entry.createdAt === "number"
+          ? entry.createdAt
+          : typeof entry.at === "string"
+            ? Date.parse(entry.at)
+            : Number.NaN;
+
+    const timestamp = Number.isFinite(rawTimestamp) && rawTimestamp > 0 ? Math.round(rawTimestamp) : Date.now();
+    const id = typeof entry.id === "string" && entry.id.trim() ? entry.id : `${timestamp}-${output.length}`;
+    const time = typeof entry.time === "string" && entry.time.trim() ? entry.time : formatNoticeTime(timestamp);
+
+    output.push({
+      id,
+      text,
+      time,
+      timestamp
+    });
+  }
+
+  return output.slice(0, NOTICE_HISTORY_LIMIT);
+}
+
+function normalizeLoadedState(raw: unknown): NormalizedLoadedState | null {
+  if (!isRecord(raw)) {
+    return null;
+  }
+
+  const stored = raw as StoredProjectDocument;
+  const hasV2Envelope =
+    stored.format === PROJECT_FILE_FORMAT ||
+    "layout" in stored ||
+    "history" in stored ||
+    "memories" in stored ||
+    "historyPast" in stored ||
+    "historyFuture" in stored;
+
+  if (!hasV2Envelope) {
+    return {
+      project: normalizeLoadedProject(stored as LegacyProject),
+      historyPast: [],
+      historyFuture: [],
+      noticeHistory: [],
+      source: "legacy"
+    };
+  }
+
+  const layoutCandidate = (isRecord(stored.layout) ? stored.layout : isRecord(stored.project) ? stored.project : stored) as LegacyProject;
+  const historyContainer = isRecord(stored.history) ? stored.history : undefined;
+  const historyPast = sanitizeHistoryEntries(historyContainer?.past ?? stored.historyPast).slice(-HISTORY_LIMIT);
+  const historyFuture = sanitizeHistoryEntries(historyContainer?.future ?? stored.historyFuture).slice(0, HISTORY_LIMIT);
+  const memories = sanitizeNoticeHistory(stored.memories ?? stored.noticeHistory);
+
+  return {
+    project: normalizeLoadedProject(layoutCandidate),
+    historyPast,
+    historyFuture,
+    noticeHistory: memories,
+    source: "v2"
+  };
+}
+
+function createPersistedProjectDocument(state: Pick<EditorStore, "project" | "historyPast" | "historyFuture" | "noticeHistory">): PersistedProjectDocumentV2 {
+  return {
+    format: PROJECT_FILE_FORMAT,
+    version: PROJECT_FILE_VERSION,
+    savedAt: new Date().toISOString(),
+    layout: cloneProject(state.project),
+    history: {
+      past: structuredClone(state.historyPast),
+      future: structuredClone(state.historyFuture)
+    },
+    memories: structuredClone(state.noticeHistory)
+  };
+}
+
 function withHistory(
-  state: Pick<EditorStore, "project" | "historyPast">,
+  state: Pick<EditorStore, "project" | "historyPast" | "noticeHistory">,
   nextProject: Project,
   message?: string
 ) {
@@ -136,7 +376,7 @@ function withHistory(
     project: nextProject,
     historyPast: nextPast,
     historyFuture: [] as HistoryEntry[],
-    notice: entry.message
+    ...withNotice(state, entry.message)
   };
 }
 
@@ -441,6 +681,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   snapSizeTo16: false,
   historyPast: [],
   historyFuture: [],
+  noticeHistory: [],
   busy: {
     generatingPanelId: undefined,
     uploadingPanelId: undefined,
@@ -449,13 +690,17 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   },
   notice: undefined,
 
-  setNotice: (notice) => set({ notice }),
+  setNotice: (notice) => {
+    set((state) => ({
+      ...withNotice(state, notice)
+    }));
+  },
 
   undo: () => {
     set((state) => {
       if (state.historyPast.length === 0) {
         return {
-          notice: "没有可撤销操作"
+          ...withNotice(state, "没有可撤销操作")
         };
       }
 
@@ -468,7 +713,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         historyPast: nextPast,
         historyFuture: nextFuture,
         selection: undefined,
-        notice: `已撤销：${entry.message}`
+        ...withNotice(state, `已撤销：${entry.message}`)
       };
     });
   },
@@ -477,7 +722,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     set((state) => {
       if (state.historyFuture.length === 0) {
         return {
-          notice: "没有可重做操作"
+          ...withNotice(state, "没有可重做操作")
         };
       }
 
@@ -490,7 +735,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         historyPast: nextPast,
         historyFuture: nextFuture,
         selection: undefined,
-        notice: `已重做：${entry.message}`
+        ...withNotice(state, `已重做：${entry.message}`)
       };
     });
   },
@@ -572,7 +817,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       const activePage = getActivePage(state.project);
       if (activePage.panels.length === 0) {
         return {
-          notice: "当前没有分镜"
+          ...withNotice(state, "当前没有分镜")
         };
       }
 
@@ -590,7 +835,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       const historyState = withHistory(state, nextProject, "已应用分镜样式到当前页");
       if (!historyState) {
         return {
-          notice: "所有分镜样式未变化"
+          ...withNotice(state, "所有分镜样式未变化")
         };
       }
 
@@ -647,7 +892,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     set((state) => {
       if (state.project.pages.length <= 1) {
         return {
-          notice: "至少保留 1 页"
+          ...withNotice(state, "至少保留 1 页")
         };
       }
 
@@ -741,7 +986,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   splitSelectedPanel: (rows, cols) => {
     const selected = get().selection;
     if (!selected || selected.kind !== "panel") {
-      set({ notice: "请先选择一个分镜" });
+      get().setNotice("请先选择一个分镜");
       return;
     }
 
@@ -999,17 +1244,23 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   },
 
   toggleManualPanelMode: (enabled) => {
-    set((state) => ({
-      manualPanelMode: enabled ?? !state.manualPanelMode,
-      notice: (enabled ?? !state.manualPanelMode) ? "手绘分镜模式已开启" : "手绘分镜模式已关闭"
-    }));
+    set((state) => {
+      const nextEnabled = enabled ?? !state.manualPanelMode;
+      return {
+        manualPanelMode: nextEnabled,
+        ...withNotice(state, nextEnabled ? "手绘分镜模式已开启" : "手绘分镜模式已关闭")
+      };
+    });
   },
 
   toggleSnapSizeTo16: (enabled) => {
-    set((state) => ({
-      snapSizeTo16: enabled ?? !state.snapSizeTo16,
-      notice: (enabled ?? !state.snapSizeTo16) ? "已开启 16 倍数尺寸吸附" : "已关闭 16 倍数尺寸吸附"
-    }));
+    set((state) => {
+      const nextEnabled = enabled ?? !state.snapSizeTo16;
+      return {
+        snapSizeTo16: nextEnabled,
+        ...withNotice(state, nextEnabled ? "已开启 16 倍数尺寸吸附" : "已关闭 16 倍数尺寸吸附")
+      };
+    });
   },
 
   setPanelCrop: (id, crop) => {
@@ -1098,7 +1349,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   uploadLocalImageForPanel: async (id, file) => {
     const panel = findPanel(get().project, id);
     if (!panel) {
-      set({ notice: "找不到分镜" });
+      get().setNotice("找不到分镜");
       return;
     }
 
@@ -1107,7 +1358,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         ...state.busy,
         uploadingPanelId: id
       },
-      notice: "正在导入本地图像..."
+      ...withNotice(state, "正在导入本地图像...")
     }));
 
     try {
@@ -1125,7 +1376,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
         if (!nextProject) {
           return {
-            notice: "分镜已不存在"
+            ...withNotice(state, "分镜已不存在")
           };
         }
 
@@ -1140,7 +1391,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "导入失败";
-      set({ notice: message });
+      get().setNotice(message);
     } finally {
       set((state) => ({
         busy: {
@@ -1154,13 +1405,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   generateImageForPanel: async (id) => {
     const panel = findPanel(get().project, id);
     if (!panel) {
-      set({ notice: "找不到分镜" });
+      get().setNotice("找不到分镜");
       return;
     }
 
     const prompt = panel.prompt?.trim();
     if (!prompt) {
-      set({ notice: "请先输入 Prompt" });
+      get().setNotice("请先输入 Prompt");
       return;
     }
 
@@ -1169,7 +1420,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         ...state.busy,
         generatingPanelId: id
       },
-      notice: "正在生成图像..."
+      ...withNotice(state, "正在生成图像...")
     }));
 
     try {
@@ -1192,7 +1443,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
         if (!nextProject) {
           return {
-            notice: "分镜已不存在"
+            ...withNotice(state, "分镜已不存在")
           };
         }
 
@@ -1207,7 +1458,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "图像生成失败";
-      set({ notice: message });
+      get().setNotice(message);
     } finally {
       set((state) => ({
         busy: {
@@ -1224,15 +1475,16 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         ...state.busy,
         savingProject: true
       },
-      notice: "正在保存项目..."
+      ...withNotice(state, "正在保存项目...")
     }));
 
     try {
-      await saveProjectApi(get().project);
-      set({ notice: "项目已保存到 ./project/project.json" });
+      const state = get();
+      await saveProjectApi(createPersistedProjectDocument(state));
+      get().setNotice("项目已保存到 ./project/project.json");
     } catch (error) {
       const message = error instanceof Error ? error.message : "保存失败";
-      set({ notice: message });
+      get().setNotice(message);
     } finally {
       set((state) => ({
         busy: {
@@ -1249,31 +1501,43 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         ...state.busy,
         loadingProject: true
       },
-      notice: "正在加载项目..."
+      ...withNotice(state, "正在加载项目...")
     }));
 
     try {
       const loaded = await loadProjectApi();
       if (!loaded) {
-        set({ notice: "未找到已保存项目" });
+        get().setNotice("未找到已保存项目");
         return;
       }
 
-      const normalized = normalizeLoadedProject(loaded as LegacyProject);
+      const normalized = normalizeLoadedState(loaded);
+      if (!normalized) {
+        get().setNotice("项目数据格式无效");
+        return;
+      }
+
+      const loadNotice =
+        normalized.source === "v2"
+          ? `项目加载完成：已恢复 ${normalized.historyPast.length} 条撤销记录、${normalized.historyFuture.length} 条重做记录、${normalized.noticeHistory.length} 条消息`
+          : "项目加载完成：旧版项目不包含可恢复的编辑记忆";
+
+      const nextNoticeHistory = appendNoticeToHistory(normalized.noticeHistory, loadNotice);
 
       set({
         project: {
-          ...normalized,
-          id: normalized.id || uuidv4()
+          ...normalized.project,
+          id: normalized.project.id || uuidv4()
         },
-        historyPast: [],
-        historyFuture: [],
+        historyPast: normalized.historyPast,
+        historyFuture: normalized.historyFuture,
+        noticeHistory: nextNoticeHistory,
         selection: undefined,
-        notice: "项目加载完成"
+        notice: loadNotice
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "加载失败";
-      set({ notice: message });
+      get().setNotice(message);
     } finally {
       set((state) => ({
         busy: {

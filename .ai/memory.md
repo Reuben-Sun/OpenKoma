@@ -341,3 +341,32 @@
     - 为分镜、气泡、Transformer 增加 name 标记，确保命中判定稳定
 - 验证：
   - `npm run build` 通过
+
+## 2026-04-05 - 新版项目存档（布局 + 记忆 + 可恢复撤销重做）
+
+- 目标：
+  - 项目保存时不仅保留布局，还要保存“编辑记忆”（消息历史）与增量历史补丁
+  - 项目加载后可恢复撤销/重做能力，并同步更新底栏消息与历史
+- 存档格式升级（v2）：
+  - `format: "openkoma-project"`
+  - `version: 2`
+  - `layout`: 当前项目布局 JSON（多页面）
+  - `history.past / history.future`: 增量补丁历史（用于 undo/redo）
+  - `memories`: 消息历史（含时间与时间戳）
+- 关键实现：
+  - `src/lib/store.ts`
+    - 新增 `noticeHistory` 到全局 store，消息历史不再由 `App` 本地临时维护
+    - 新增统一消息记录辅助函数，所有 `notice` 更新会写入 `noticeHistory`
+    - `withHistory` 统一写入增量历史和对应消息，undo/redo 也会记录并可持久化
+    - `saveProject` 改为保存 v2 文档（布局 + 历史 + 记忆）
+    - `loadProject` 支持两种输入：
+      - v2 存档：恢复布局 + undo/redo 历史 + 消息历史
+      - 旧版布局文件：兼容加载，提示“旧版项目不包含可恢复编辑记忆”
+    - 加载完成消息会明确恢复数量（撤销/重做/消息条数）
+  - `src/App.tsx`
+    - 移除组件内 `noticeHistory` 本地状态与收集逻辑
+    - 直接消费 store 中的 `noticeHistory`，加载后历史面板即时可见
+  - `src/lib/api.ts`
+    - `saveProject/loadProject` 参数改为 `unknown`，由 store 负责版本解析
+- 验证：
+  - `npm run build` 通过

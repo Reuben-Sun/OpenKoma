@@ -5,16 +5,11 @@ import PageSidebar from "./components/PageSidebar";
 import Toolbar from "./components/Toolbar";
 import { getActivePage, useEditorStore } from "./lib/store";
 
-type NoticeEntry = {
-  id: number;
-  text: string;
-  time: string;
-};
-
 export default function App() {
   const project = useEditorStore((state) => state.project);
   const activePage = useEditorStore((state) => getActivePage(state.project));
   const notice = useEditorStore((state) => state.notice);
+  const noticeHistory = useEditorStore((state) => state.noticeHistory);
   const undo = useEditorStore((state) => state.undo);
   const redo = useEditorStore((state) => state.redo);
   const deleteSelection = useEditorStore((state) => state.deleteSelection);
@@ -22,7 +17,6 @@ export default function App() {
   const canvasEditorRef = useRef<CanvasEditorHandle | null>(null);
   const noticeBarRef = useRef<HTMLDivElement | null>(null);
   const activePageNumber = project.pages.findIndex((page) => page.id === project.activePageId) + 1;
-  const [noticeHistory, setNoticeHistory] = useState<NoticeEntry[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
 
   const exportPng = useCallback(async () => {
@@ -76,26 +70,6 @@ export default function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [deleteSelection, redo, undo]);
-
-  useEffect(() => {
-    if (!notice) {
-      return;
-    }
-
-    const now = new Date();
-    const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(
-      now.getSeconds()
-    ).padStart(2, "0")}`;
-
-    setNoticeHistory((previous) => {
-      const entry: NoticeEntry = {
-        id: now.getTime() + Math.floor(Math.random() * 1000),
-        text: notice,
-        time
-      };
-      return [entry, ...previous].slice(0, 60);
-    });
-  }, [notice]);
 
   useEffect(() => {
     if (!historyOpen) {

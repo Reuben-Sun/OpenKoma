@@ -1,4 +1,4 @@
-import { GeneratePayload, Project } from "../types";
+import { GeneratePayload } from "../types";
 
 export type GenerateResponse = {
   url: string;
@@ -102,7 +102,7 @@ export async function uploadLocalImage(file: File): Promise<UploadImageResponse>
   };
 }
 
-export async function saveProject(project: Project): Promise<void> {
+export async function saveProject(project: unknown): Promise<void> {
   const response = await fetch("/api/project/save", {
     method: "POST",
     headers: {
@@ -114,11 +114,11 @@ export async function saveProject(project: Project): Promise<void> {
   await parseJson<{ ok: true }>(response);
 }
 
-export async function loadProject(): Promise<Project | null> {
+export async function loadProject(): Promise<unknown | null> {
   const response = await fetch("/api/project/load", {
     method: "GET"
   });
 
-  const body = await parseJson<{ project: Project | null }>(response);
+  const body = await parseJson<{ project: unknown | null }>(response);
   return body.project;
 }
