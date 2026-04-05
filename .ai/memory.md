@@ -635,3 +635,24 @@
     - `project.json (layout)`
     - `history.log (messages + patches)`
   - 移除 `\\n` 形式换行，避免 GitHub Mermaid 解析歧义
+
+## 2026-04-05 - README 双语重构（核心卖点/功能 + 折叠 Roadmap）（增量）
+
+- 目标：
+  - 基于历史记忆提炼项目核心卖点与功能，更新 README
+  - 移除不需要的章节：`Optional Environment Variables`、`Storage Format`、`API Snapshot`
+  - 增加中英文可切换的 README
+  - 将 Roadmap 改为可折叠详情
+- 实现：
+  - `README.md`（英文）重写：
+    - 新增语言切换入口：`English | 简体中文`
+    - 强化 `Why OpenKoma (Core Selling Points)` 与 `Feature Highlights`
+    - 卖点来自已实现能力：增量可逆历史、非破坏裁剪、比例安全裁剪、多页面流程、消息与撤销重做联动、本地优先保存流
+    - 删除章节：`Optional Environment Variables`、`Storage Format`、`API Snapshot`
+    - `Roadmap` 改为 `<details>` 可折叠，细化里程碑
+  - 新增 `README.zh-CN.md`（中文）：
+    - 与英文 README 对应结构
+    - 提供同样的核心卖点、功能说明、快捷键、可折叠 Roadmap
+    - 顶部支持语言切换
+- 说明：
+  - 路线图条目依据记忆中的未实现项与长期方向（PSD 导出、多选批量、版式模板、高级排版）
