@@ -8,6 +8,7 @@ import { getActivePage, useEditorStore } from "./lib/store";
 export default function App() {
   const project = useEditorStore((state) => state.project);
   const activePage = useEditorStore((state) => getActivePage(state.project));
+  const notice = useEditorStore((state) => state.notice);
   const undo = useEditorStore((state) => state.undo);
   const redo = useEditorStore((state) => state.redo);
   const deleteSelection = useEditorStore((state) => state.deleteSelection);
@@ -86,14 +87,23 @@ export default function App() {
           </div>
         </section>
 
-        <footer className="studio-surface flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-xs text-[var(--text-secondary)]">
-          <div className="flex items-center gap-2">
+        <footer className="studio-surface grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-4 py-2.5 text-xs text-[var(--text-secondary)]">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 justify-self-start">
             <span className="studio-chip px-2.5 py-1">Page {activePageNumber} / {project.pages.length}</span>
             <span className="studio-chip px-2.5 py-1">
               Canvas {activePage.canvas.width} x {activePage.canvas.height}
             </span>
           </div>
-          <div className="flex items-center gap-2">
+
+          <div className="min-h-[28px] justify-self-center">
+            {notice ? (
+              <span className="rounded-lg border border-cyan-300/35 bg-cyan-500/14 px-3 py-1.5 text-xs text-cyan-100">
+                {notice}
+              </span>
+            ) : null}
+          </div>
+
+          <div className="flex min-w-0 flex-wrap items-center gap-2 justify-self-end">
             <span className="studio-chip px-2.5 py-1">Panels {activePage.panels.length}</span>
             <span className="studio-chip px-2.5 py-1">Bubbles {activePage.bubbles.length}</span>
           </div>

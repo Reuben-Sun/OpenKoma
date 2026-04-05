@@ -35,7 +35,6 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
   const manualPanelMode = useEditorStore((state) => state.manualPanelMode);
   const snapSizeTo16 = useEditorStore((state) => state.snapSizeTo16);
   const busy = useEditorStore((state) => state.busy);
-  const notice = useEditorStore((state) => state.notice);
   const historyPastCount = useEditorStore((state) => state.historyPast.length);
   const historyFutureCount = useEditorStore((state) => state.historyFuture.length);
 
@@ -345,11 +344,6 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
         </>
       ) : null}
 
-      {notice ? (
-        <p className="pointer-events-none absolute left-3 top-[calc(100%+10px)] z-30 rounded-xl border border-cyan-300/35 bg-cyan-500/12 px-3 py-2 text-sm text-cyan-100/95">
-          {notice}
-        </p>
-      ) : null}
     </header>
   );
 }
