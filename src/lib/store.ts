@@ -16,6 +16,7 @@ import { Bubble, BubbleType, CanvasPreset, CropConfig, Panel, Project, ProjectPa
 type HistoryEntry = {
   forward: Operation[];
   backward: Operation[];
+  message: string;
 };
 
 type EditorStore = {
@@ -91,7 +92,15 @@ function cloneProject(project: Project): Project {
   return structuredClone(project);
 }
 
-function createHistoryEntry(previous: Project, next: Project): HistoryEntry | null {
+function normalizeHistoryMessage(message: string | undefined): string {
+  const trimmed = message?.trim();
+  if (!trimmed) {
+    return "已修改项目";
+  }
+  return trimmed;
+}
+
+function createHistoryEntry(previous: Project, next: Project, message?: string): HistoryEntry | null {
   const forward = compare(previous, next);
   if (forward.length === 0) {
     return null;
@@ -99,7 +108,8 @@ function createHistoryEntry(previous: Project, next: Project): HistoryEntry | nu
   const backward = compare(next, previous);
   return {
     forward,
-    backward
+    backward,
+    message: normalizeHistoryMessage(message)
   };
 }
 
@@ -107,8 +117,12 @@ function applyHistory(project: Project, operations: Operation[]): Project {
   return applyPatch(cloneProject(project), operations, false, true).newDocument as Project;
 }
 
-function withHistory(state: Pick<EditorStore, "project" | "historyPast">, nextProject: Project) {
-  const entry = createHistoryEntry(state.project, nextProject);
+function withHistory(
+  state: Pick<EditorStore, "project" | "historyPast">,
+  nextProject: Project,
+  message?: string
+) {
+  const entry = createHistoryEntry(state.project, nextProject, message);
   if (!entry) {
     return null;
   }
@@ -121,8 +135,62 @@ function withHistory(state: Pick<EditorStore, "project" | "historyPast">, nextPr
   return {
     project: nextProject,
     historyPast: nextPast,
-    historyFuture: [] as HistoryEntry[]
+    historyFuture: [] as HistoryEntry[],
+    notice: entry.message
   };
+}
+
+function describePanelPatch(patch: Partial<Panel>): string {
+  if ("prompt" in patch || "negativePrompt" in patch) {
+    return "已修改分镜提示词";
+  }
+
+  if ("x" in patch || "y" in patch || "width" in patch || "height" in patch) {
+    return "已调整分镜位置或尺寸";
+  }
+
+  if ("borderWidth" in patch || "borderRadius" in patch || "borderColor" in patch || "gap" in patch) {
+    return "已修改分镜样式";
+  }
+
+  if ("image" in patch) {
+    return "已更新分镜图像";
+  }
+
+  return "已更新分镜";
+}
+
+function describeBubblePatch(patch: Partial<Bubble>): string {
+  if ("text" in patch) {
+    return "已编辑气泡文本";
+  }
+
+  if ("x" in patch || "y" in patch || "width" in patch || "height" in patch) {
+    return "已调整气泡位置或尺寸";
+  }
+
+  if (
+    "type" in patch ||
+    "direction" in patch ||
+    "fontSize" in patch ||
+    "fontFamily" in patch ||
+    "background" in patch ||
+    "borderColor" in patch
+  ) {
+    return "已修改气泡样式";
+  }
+
+  return "已更新气泡";
+}
+
+function bubbleTypeLabel(type: BubbleType): string {
+  if (type === "rect") {
+    return "矩形";
+  }
+  if (type === "rounded") {
+    return "圆角";
+  }
+  return "圆形";
 }
 
 function sanitizePanel(panel: Panel): Panel {
@@ -400,7 +468,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         historyPast: nextPast,
         historyFuture: nextFuture,
         selection: undefined,
-        notice: "已撤销"
+        notice: `已撤销：${entry.message}`
       };
     });
   },
@@ -422,7 +490,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         historyPast: nextPast,
         historyFuture: nextFuture,
         selection: undefined,
-        notice: "已重做"
+        notice: `已重做：${entry.message}`
       };
     });
   },
@@ -438,7 +506,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         name
       };
 
-      const historyState = withHistory(state, nextProject);
+      const safeName = name.trim() || "未命名项目";
+      const historyState = withHistory(state, nextProject, `项目名称已改为 ${safeName}`);
       if (!historyState) {
         return state;
       }
@@ -462,31 +531,32 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         }
       }));
 
-      const historyState = withHistory(state, nextProject);
+      const historyState = withHistory(state, nextProject, `画布已切换为 ${preset}`);
       if (!historyState) {
         return state;
       }
 
       return {
-        ...historyState,
-        notice: `画布已切换为 ${preset}`
+        ...historyState
       };
     });
   },
 
   setCanvasSize: (width, height) => {
     set((state) => {
+      const nextWidth = Math.max(240, Math.round(width));
+      const nextHeight = Math.max(240, Math.round(height));
       const nextProject = updateActivePage(state.project, (page) => ({
         ...page,
         canvas: {
           ...page.canvas,
-          width: Math.max(240, Math.round(width)),
-          height: Math.max(240, Math.round(height)),
+          width: nextWidth,
+          height: nextHeight,
           preset: "custom"
         }
       }));
 
-      const historyState = withHistory(state, nextProject);
+      const historyState = withHistory(state, nextProject, `画布尺寸已调整为 ${nextWidth} x ${nextHeight}`);
       if (!historyState) {
         return state;
       }
@@ -517,7 +587,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         )
       }));
 
-      const historyState = withHistory(state, nextProject);
+      const historyState = withHistory(state, nextProject, "已应用分镜样式到当前页");
       if (!historyState) {
         return {
           notice: "所有分镜样式未变化"
@@ -525,8 +595,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       }
 
       return {
-        ...historyState,
-        notice: "已应用到全部分镜"
+        ...historyState
       };
     });
   },
@@ -562,15 +631,14 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         activePageId: newPage.id
       };
 
-      const historyState = withHistory(state, nextProject);
+      const historyState = withHistory(state, nextProject, `已新增页面：${newPage.name}`);
       if (!historyState) {
         return state;
       }
 
       return {
         ...historyState,
-        selection: undefined,
-        notice: "已新增页面"
+        selection: undefined
       };
     });
   },
@@ -600,15 +668,15 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         activePageId: nextActive
       };
 
-      const historyState = withHistory(state, nextProject);
+      const pageName = state.project.pages[index].name;
+      const historyState = withHistory(state, nextProject, `已删除页面：${pageName}`);
       if (!historyState) {
         return state;
       }
 
       return {
         ...historyState,
-        selection: undefined,
-        notice: "已删除页面"
+        selection: undefined
       };
     });
   },
@@ -635,14 +703,14 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         pages: nextPages
       };
 
-      const historyState = withHistory(state, nextProject);
+      const pageName = nextPages[targetIndex].name;
+      const historyState = withHistory(state, nextProject, direction === "up" ? `页面已上移：${pageName}` : `页面已下移：${pageName}`);
       if (!historyState) {
         return state;
       }
 
       return {
-        ...historyState,
-        notice: direction === "up" ? "页面已上移" : "页面已下移"
+        ...historyState
       };
     });
   },
@@ -658,15 +726,14 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         panels: splitGridPanels(activePage.canvas.width, activePage.canvas.height, safeRows, safeCols)
       }));
 
-      const historyState = withHistory(state, nextProject);
+      const historyState = withHistory(state, nextProject, `已按 ${safeRows} x ${safeCols} 网格切割`);
       if (!historyState) {
         return state;
       }
 
       return {
         ...historyState,
-        selection: undefined,
-        notice: `已按 ${safeRows} x ${safeCols} 网格切割`
+        selection: undefined
       };
     });
   },
@@ -720,7 +787,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         panels: [...page.panels.filter((panel) => panel.id !== target.id), ...children]
       }));
 
-      const historyState = withHistory(state, nextProject);
+      const historyState = withHistory(state, nextProject, `已将分镜切割为 ${safeRows} x ${safeCols}`);
       if (!historyState) {
         return state;
       }
@@ -730,8 +797,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         selection: {
           kind: "panel",
           id: children[0]?.id ?? target.id
-        },
-        notice: `已将分镜切割为 ${safeRows} x ${safeCols}`
+        }
       };
     });
   },
@@ -759,7 +825,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         panels: [...page.panels, panel]
       }));
 
-      const historyState = withHistory(state, nextProject);
+      const historyState = withHistory(state, nextProject, "已创建分镜");
       if (!historyState) {
         return state;
       }
@@ -815,15 +881,14 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
           panels: page.panels.filter((panel) => panel.id !== state.selection?.id)
         }));
 
-        const historyState = withHistory(state, nextProject);
+        const historyState = withHistory(state, nextProject, "已删除分镜");
         if (!historyState) {
           return state;
         }
 
         return {
           ...historyState,
-          selection: undefined,
-          notice: "已删除分镜"
+          selection: undefined
         };
       }
 
@@ -838,15 +903,14 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         bubbles: page.bubbles.filter((bubble) => bubble.id !== state.selection?.id)
       }));
 
-      const historyState = withHistory(state, nextProject);
+      const historyState = withHistory(state, nextProject, "已删除气泡");
       if (!historyState) {
         return state;
       }
 
       return {
         ...historyState,
-        selection: undefined,
-        notice: "已删除气泡"
+        selection: undefined
       };
     });
   },
@@ -863,7 +927,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         panels: replacePanel(page.panels, id, patch)
       }));
 
-      const historyState = withHistory(state, nextProject);
+      const historyState = withHistory(state, nextProject, describePanelPatch(patch));
       if (!historyState) {
         return state;
       }
@@ -900,7 +964,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         })
       }));
 
-      const historyState = withHistory(state, nextProject);
+      const historyState = withHistory(state, nextProject, describeBubblePatch(patch));
       if (!historyState) {
         return state;
       }
@@ -919,7 +983,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         bubbles: [...page.bubbles, bubble]
       }));
 
-      const historyState = withHistory(state, nextProject);
+      const historyState = withHistory(state, nextProject, `已创建${bubbleTypeLabel(type)}气泡`);
       if (!historyState) {
         return state;
       }
@@ -929,8 +993,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         selection: {
           kind: "bubble",
           id: bubble.id
-        },
-        notice: "已创建气泡"
+        }
       };
     });
   },
@@ -986,7 +1049,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         })
       }));
 
-      const historyState = withHistory(state, nextProject);
+      const historyState = withHistory(state, nextProject, "已更新图片裁剪");
       if (!historyState) {
         return state;
       }
@@ -1021,7 +1084,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         })
       }));
 
-      const historyState = withHistory(state, nextProject);
+      const historyState = withHistory(state, nextProject, "已重置图片裁剪");
       if (!historyState) {
         return state;
       }
@@ -1066,14 +1129,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
           };
         }
 
-        const historyState = withHistory(state, nextProject);
+        const historyState = withHistory(state, nextProject, "已导入本地图像");
         if (!historyState) {
           return state;
         }
 
         return {
-          ...historyState,
-          notice: "本地图像导入完成"
+          ...historyState
         };
       });
     } catch (error) {
@@ -1134,14 +1196,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
           };
         }
 
-        const historyState = withHistory(state, nextProject);
+        const historyState = withHistory(state, nextProject, "已生成分镜图像");
         if (!historyState) {
           return state;
         }
 
         return {
-          ...historyState,
-          notice: "图像生成完成"
+          ...historyState
         };
       });
     } catch (error) {
