@@ -50,6 +50,7 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
   const toggleSnapSizeTo16 = useEditorStore((state) => state.toggleSnapSizeTo16);
   const addBubble = useEditorStore((state) => state.addBubble);
   const saveProject = useEditorStore((state) => state.saveProject);
+  const saveProjectAs = useEditorStore((state) => state.saveProjectAs);
   const loadProject = useEditorStore((state) => state.loadProject);
   const deleteSelection = useEditorStore((state) => state.deleteSelection);
 
@@ -127,6 +128,15 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
           }}
         >
           {busy.savingProject ? "保存中..." : "保存项目"}
+        </button>
+        <button
+          className={compactButtonClass}
+          disabled={busy.savingProject}
+          onClick={() => {
+            void saveProjectAs();
+          }}
+        >
+          {busy.savingProject ? "处理中..." : "另存为"}
         </button>
         <button
           className={compactButtonClass}

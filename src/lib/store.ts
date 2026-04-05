@@ -1,7 +1,14 @@
 import { create } from "zustand";
 import { v4 as uuidv4 } from "uuid";
 import { applyPatch, compare, type Operation } from "fast-json-patch";
-import { generateImage, loadProject as loadProjectApi, saveProject as saveProjectApi, uploadLocalImage } from "./api";
+import {
+  clearTempProjectSnapshot,
+  generateImage,
+  loadProject as loadProjectApi,
+  saveProject as saveProjectApi,
+  saveTempProjectSnapshot,
+  uploadLocalImage
+} from "./api";
 import {
   clamp,
   createBubble as createBubbleFactory,
@@ -85,6 +92,7 @@ type EditorStore = {
   generateImageForPanel: (id: string) => Promise<void>;
 
   saveProject: () => Promise<void>;
+  saveProjectAs: () => Promise<void>;
   loadProject: () => Promise<void>;
 };
 
@@ -188,6 +196,23 @@ async function pickProjectDirectory(): Promise<FileSystemDirectoryHandle | null>
     }
     throw error;
   }
+}
+
+function getTempProjectIdForUnsaved(
+  state: Pick<EditorStore, "project" | "projectDirectoryHandle">,
+  fallbackProjectId?: string
+): string | undefined {
+  if (state.projectDirectoryHandle) {
+    return undefined;
+  }
+
+  const candidate = String(fallbackProjectId ?? state.project.id ?? "").trim();
+  if (!candidate) {
+    return undefined;
+  }
+
+  const normalized = candidate.replace(/[^\w.-]+/g, "_").replace(/^_+|_+$/g, "");
+  return normalized || undefined;
 }
 
 async function readJsonFromDirectory(directory: FileSystemDirectoryHandle): Promise<unknown> {
@@ -759,6 +784,54 @@ async function materializeProjectAssetsForLoad(
   };
 }
 
+type ReboundRuntimeAssetResult = {
+  project: Project;
+  historyPast: HistoryEntry[];
+  historyFuture: HistoryEntry[];
+  runtimeAssetRefMap: Record<string, string>;
+  objectUrls: string[];
+  missingAssetRefs: string[];
+};
+
+async function rebindRuntimeAssetRefsFromDirectory(
+  runtime: Pick<EditorStore, "project" | "historyPast" | "historyFuture">,
+  directory: FileSystemDirectoryHandle,
+  runtimeToAssetRefMap: Record<string, string>
+): Promise<ReboundRuntimeAssetResult> {
+  const replacement = new Map<string, string>();
+  const runtimeAssetRefMap: Record<string, string> = {};
+  const objectUrls: string[] = [];
+  const missingAssetRefs: string[] = [];
+
+  for (const [runtimeRef, rawAssetRef] of Object.entries(runtimeToAssetRefMap)) {
+    const normalizedAssetRef = normalizeProjectAssetRef(rawAssetRef) ?? sanitizePathSegments(rawAssetRef)?.join("/");
+    if (!normalizedAssetRef) {
+      missingAssetRefs.push(rawAssetRef);
+      continue;
+    }
+
+    const blob = await readBlobFromDirectoryByPath(directory, normalizedAssetRef);
+    if (!blob) {
+      missingAssetRefs.push(normalizedAssetRef);
+      continue;
+    }
+
+    const objectUrl = URL.createObjectURL(blob);
+    replacement.set(runtimeRef, objectUrl);
+    runtimeAssetRefMap[objectUrl] = normalizedAssetRef;
+    objectUrls.push(objectUrl);
+  }
+
+  return {
+    project: mapImageOriginalRefs(runtime.project, replacement),
+    historyPast: mapImageOriginalRefs(runtime.historyPast, replacement),
+    historyFuture: mapImageOriginalRefs(runtime.historyFuture, replacement),
+    runtimeAssetRefMap,
+    objectUrls,
+    missingAssetRefs
+  };
+}
+
 function withHistory(
   state: Pick<EditorStore, "project" | "historyPast" | "noticeHistory">,
   nextProject: Project,
@@ -1074,6 +1147,127 @@ function replacePanel(panels: Panel[], id: string, patch: Partial<Panel>): Panel
 
 function createNewPageName(project: Project): string {
   return `第 ${project.pages.length + 1} 页`;
+}
+
+async function runSaveProjectFlow(
+  set: (partial: Partial<EditorStore> | ((state: EditorStore) => Partial<EditorStore>)) => void,
+  get: () => EditorStore,
+  options?: {
+    forcePickDirectory?: boolean;
+  }
+): Promise<void> {
+  const forcePickDirectory = options?.forcePickDirectory ?? false;
+  set((state) => ({
+    busy: {
+      ...state.busy,
+      savingProject: true
+    },
+    ...withNotice(state, forcePickDirectory ? "正在另存为项目..." : "正在保存项目...")
+  }));
+
+  try {
+    if (!hasDirectoryPicker()) {
+      const state = get();
+      await saveProjectApi(createPersistedProjectDocument(state));
+      get().setNotice(
+        forcePickDirectory
+          ? "当前环境不支持另存为路径选择，已回退保存到 ./project/project.json"
+          : "当前环境不支持路径选择，已回退保存到 ./project/project.json"
+      );
+      return;
+    }
+
+    const beforeSaveState = get();
+    const sourceTempProjectId = getTempProjectIdForUnsaved(beforeSaveState);
+
+    let targetDirectory = forcePickDirectory ? undefined : beforeSaveState.projectDirectoryHandle;
+    if (!targetDirectory) {
+      const pickedDirectory = await pickProjectDirectory();
+      if (!pickedDirectory) {
+        get().setNotice(forcePickDirectory ? "已取消另存为" : "已取消保存");
+        return;
+      }
+      targetDirectory = pickedDirectory;
+    }
+
+    const state = get();
+    const baseDocument = createPersistedProjectDocument(state);
+    const materialized = await materializeProjectAssetsForSave(
+      baseDocument,
+      targetDirectory,
+      state.projectDirectoryHandle ?? targetDirectory,
+      state.assetRefMap
+    );
+
+    await writeJsonToDirectory(targetDirectory, materialized.document);
+
+    let nextProject = state.project;
+    let nextHistoryPast = state.historyPast;
+    let nextHistoryFuture = state.historyFuture;
+    let nextAssetRefMap = materialized.runtimeAssetRefMap;
+    let nextTransientObjectUrls = state.transientObjectUrls;
+    let movedFromTemp = false;
+
+    if (sourceTempProjectId && materialized.unresolvedRefs.length === 0) {
+      const rebound = await rebindRuntimeAssetRefsFromDirectory(
+        {
+          project: state.project,
+          historyPast: state.historyPast,
+          historyFuture: state.historyFuture
+        },
+        targetDirectory,
+        materialized.runtimeAssetRefMap
+      );
+
+      if (rebound.missingAssetRefs.length === 0) {
+        revokeObjectUrls(state.transientObjectUrls);
+        nextProject = rebound.project;
+        nextHistoryPast = rebound.historyPast;
+        nextHistoryFuture = rebound.historyFuture;
+        nextAssetRefMap = rebound.runtimeAssetRefMap;
+        nextTransientObjectUrls = rebound.objectUrls;
+        movedFromTemp = true;
+      } else {
+        revokeObjectUrls(rebound.objectUrls);
+      }
+    }
+
+    set({
+      project: nextProject,
+      historyPast: nextHistoryPast,
+      historyFuture: nextHistoryFuture,
+      projectDirectoryHandle: targetDirectory,
+      projectDirectoryName: targetDirectory.name,
+      assetRefMap: nextAssetRefMap,
+      transientObjectUrls: nextTransientObjectUrls
+    });
+
+    if (movedFromTemp && sourceTempProjectId) {
+      await clearTempProjectSnapshot(sourceTempProjectId);
+    }
+
+    if (materialized.unresolvedRefs.length > 0) {
+      get().setNotice(
+        `项目已保存到 ${targetDirectory.name}/${PROJECT_JSON_FILENAME}，但有 ${materialized.unresolvedRefs.length} 张图片未能写入`
+      );
+    } else {
+      get().setNotice(
+        forcePickDirectory
+          ? `项目已另存为 ${targetDirectory.name}/${PROJECT_JSON_FILENAME}`
+          : `项目已保存到 ${targetDirectory.name}/${PROJECT_JSON_FILENAME}`
+      );
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "保存失败";
+    get().setNotice(message);
+  } finally {
+    set((state) => ({
+      busy: {
+        ...state.busy,
+        savingProject: false
+      }
+    }));
+  }
 }
 
 export const useEditorStore = create<EditorStore>((set, get) => ({
@@ -1768,7 +1962,10 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     }));
 
     try {
-      const result = await uploadLocalImage(file);
+      const tempProjectId = getTempProjectIdForUnsaved(get());
+      const result = await uploadLocalImage(file, {
+        tempProjectId
+      });
       set((state) => {
         const nextProject = updateProjectPanelById(state.project, id, (entry) => ({
           ...entry,
@@ -1830,11 +2027,14 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     }));
 
     try {
+      const tempProjectId = getTempProjectIdForUnsaved(get());
       const result = await generateImage({
         prompt,
         negativePrompt: panel.negativePrompt,
         width: Math.max(64, Math.round(panel.width)),
         height: Math.max(64, Math.round(panel.height))
+      }, {
+        tempProjectId
       });
 
       set((state) => {
@@ -1876,67 +2076,15 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   },
 
   saveProject: async () => {
-    set((state) => ({
-      busy: {
-        ...state.busy,
-        savingProject: true
-      },
-      ...withNotice(state, "正在保存项目...")
-    }));
+    await runSaveProjectFlow(set, get, {
+      forcePickDirectory: false
+    });
+  },
 
-    try {
-      if (!hasDirectoryPicker()) {
-        const state = get();
-        await saveProjectApi(createPersistedProjectDocument(state));
-        get().setNotice("当前环境不支持路径选择，已回退保存到 ./project/project.json");
-        return;
-      }
-
-      let targetDirectory = get().projectDirectoryHandle;
-      if (!targetDirectory) {
-        const pickedDirectory = await pickProjectDirectory();
-        if (!pickedDirectory) {
-          get().setNotice("已取消保存");
-          return;
-        }
-        targetDirectory = pickedDirectory;
-      }
-
-      const state = get();
-      const baseDocument = createPersistedProjectDocument(state);
-      const materialized = await materializeProjectAssetsForSave(
-        baseDocument,
-        targetDirectory,
-        state.projectDirectoryHandle ?? targetDirectory,
-        state.assetRefMap
-      );
-
-      await writeJsonToDirectory(targetDirectory, materialized.document);
-
-      set({
-        projectDirectoryHandle: targetDirectory,
-        projectDirectoryName: targetDirectory.name,
-        assetRefMap: materialized.runtimeAssetRefMap
-      });
-
-      if (materialized.unresolvedRefs.length > 0) {
-        get().setNotice(
-          `项目已保存到 ${targetDirectory.name}/${PROJECT_JSON_FILENAME}，但有 ${materialized.unresolvedRefs.length} 张图片未能写入`
-        );
-      } else {
-        get().setNotice(`项目已保存到 ${targetDirectory.name}/${PROJECT_JSON_FILENAME}`);
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "保存失败";
-      get().setNotice(message);
-    } finally {
-      set((state) => ({
-        busy: {
-          ...state.busy,
-          savingProject: false
-        }
-      }));
-    }
+  saveProjectAs: async () => {
+    await runSaveProjectFlow(set, get, {
+      forcePickDirectory: true
+    });
   },
 
   loadProject: async () => {
@@ -2049,3 +2197,40 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     }
   }
 }));
+
+let tempProjectPersistTimer: ReturnType<typeof setTimeout> | undefined;
+let tempProjectPersistRevision = 0;
+
+useEditorStore.subscribe((state, previousState) => {
+  const changed =
+    state.project !== previousState.project ||
+    state.historyPast !== previousState.historyPast ||
+    state.historyFuture !== previousState.historyFuture ||
+    state.noticeHistory !== previousState.noticeHistory ||
+    state.projectDirectoryHandle !== previousState.projectDirectoryHandle;
+
+  if (!changed) {
+    return;
+  }
+
+  if (tempProjectPersistTimer) {
+    clearTimeout(tempProjectPersistTimer);
+    tempProjectPersistTimer = undefined;
+  }
+
+  const tempProjectId = getTempProjectIdForUnsaved(state);
+  if (!tempProjectId) {
+    return;
+  }
+
+  const snapshot = createPersistedProjectDocument(state);
+  const revision = ++tempProjectPersistRevision;
+  tempProjectPersistTimer = setTimeout(() => {
+    void saveTempProjectSnapshot(tempProjectId, snapshot).catch(() => {
+      // ignored to avoid interfering with editing flow
+    });
+    if (revision === tempProjectPersistRevision) {
+      tempProjectPersistTimer = undefined;
+    }
+  }, 320);
+});

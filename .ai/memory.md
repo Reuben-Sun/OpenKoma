@@ -403,3 +403,42 @@
   - `PROJECT_FILE_VERSION` 升级到 `3`
 - 验证：
   - `npm run build` 通过
+
+## 2026-04-05 - 新增“另存为” + 未保存项目落盘到 `project/temp`
+
+- 目标：
+  - 新增“另存为”按钮
+  - 新建/未保存项目统一先放在默认目录 `project/temp/<projectId>`
+  - 正式保存到目标路径后，将临时项目从 `temp` 清理（等价“移动过去”）
+- 前端改动：
+  - `src/components/Toolbar.tsx`
+    - 顶栏新增“另存为”按钮，调用 `saveProjectAs`
+  - `src/lib/store.ts`
+    - store 新增动作：`saveProjectAs()`
+    - 抽出统一保存流程 `runSaveProjectFlow`：
+      - `saveProject`：有路径直存，无路径弹目录选择
+      - `saveProjectAs`：强制弹目录选择
+    - 未保存项目自动使用 `project.id` 作为临时作用域 ID
+    - 本地导图/AI 生图在未保存状态下写入 temp 作用域
+    - 首次从 temp 正式保存成功后：
+      - 将运行时图片引用重绑定到保存目录中的资源
+      - 清理 `project/temp/<projectId>` 临时目录
+    - 新增 store 订阅：
+      - 当项目未绑定正式路径时，节流写入临时快照到 `project/temp/<projectId>/project.json`
+- API 改动：
+  - `src/lib/api.ts`
+    - `generateImage` / `uploadLocalImage` 支持 `tempProjectId`
+    - 新增：
+      - `saveTempProjectSnapshot(projectId, project)`
+      - `clearTempProjectSnapshot(projectId)`
+- 服务端改动：
+  - `server/index.js`
+    - 新增 temp 根目录：`project/temp`
+    - 生成图与本地上传支持按 `tempProjectId` 写入：
+      - 默认：`project/images`
+      - 临时项目：`project/temp/<projectId>/images`
+    - 新增接口：
+      - `POST /api/project/temp/save`
+      - `POST /api/project/temp/clear`
+- 验证：
+  - `npm run build` 通过

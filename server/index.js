@@ -14,8 +14,9 @@ const rootDir = process.cwd();
 const projectDir = path.join(rootDir, "project");
 const imageDir = path.join(projectDir, "images");
 const projectFile = path.join(projectDir, "project.json");
+const tempRootDir = path.join(projectDir, "temp");
 
-await fs.mkdir(imageDir, { recursive: true });
+await Promise.all([fs.mkdir(imageDir, { recursive: true }), fs.mkdir(tempRootDir, { recursive: true })]);
 
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
@@ -40,6 +41,38 @@ function pickExtension(filename, mimeType) {
     "image/svg+xml": ".svg"
   };
   return table[String(mimeType || "").toLowerCase()] || ".png";
+}
+
+function normalizeProjectKey(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return null;
+  }
+
+  const normalized = raw.replace(/[^\w.-]+/g, "_").replace(/^_+|_+$/g, "");
+  return normalized || null;
+}
+
+function resolveScopedPaths(tempProjectId) {
+  const safeProjectId = normalizeProjectKey(tempProjectId);
+  if (!safeProjectId) {
+    return {
+      scopedProjectDir: projectDir,
+      scopedImageDir: imageDir,
+      imageUrlPrefix: "/assets/images",
+      scopedProjectFile: projectFile,
+      safeProjectId: null
+    };
+  }
+
+  const scopedProjectDir = path.join(tempRootDir, safeProjectId);
+  return {
+    scopedProjectDir,
+    scopedImageDir: path.join(scopedProjectDir, "images"),
+    imageUrlPrefix: `/assets/temp/${safeProjectId}/images`,
+    scopedProjectFile: path.join(scopedProjectDir, "project.json"),
+    safeProjectId
+  };
 }
 
 function createPlaceholderSvg(prompt, width, height) {
@@ -124,6 +157,7 @@ app.post("/api/generate", async (request, response) => {
     const negativePrompt = String(request.body?.negativePrompt || "").trim();
     const width = clamp(Number(request.body?.width || 1024), 64, 4096);
     const height = clamp(Number(request.body?.height || 1024), 64, 4096);
+    const scoped = resolveScopedPaths(request.body?.tempProjectId);
 
     if (!prompt) {
       response.status(400).json({ error: "prompt 不能为空" });
@@ -141,11 +175,12 @@ app.post("/api/generate", async (request, response) => {
 
     if (remote) {
       const filename = `${filenameBase}${remote.extension}`;
-      const absolutePath = path.join(imageDir, filename);
+      await fs.mkdir(scoped.scopedImageDir, { recursive: true });
+      const absolutePath = path.join(scoped.scopedImageDir, filename);
       await fs.writeFile(absolutePath, remote.buffer);
 
       response.json({
-        url: `/assets/images/${filename}`,
+        url: `${scoped.imageUrlPrefix}/${filename}`,
         naturalWidth: width,
         naturalHeight: height
       });
@@ -153,12 +188,13 @@ app.post("/api/generate", async (request, response) => {
     }
 
     const filename = `${filenameBase}.svg`;
-    const absolutePath = path.join(imageDir, filename);
+    await fs.mkdir(scoped.scopedImageDir, { recursive: true });
+    const absolutePath = path.join(scoped.scopedImageDir, filename);
     const svg = createPlaceholderSvg(prompt, width, height);
     await fs.writeFile(absolutePath, svg, "utf8");
 
     response.json({
-      url: `/assets/images/${filename}`,
+      url: `${scoped.imageUrlPrefix}/${filename}`,
       naturalWidth: width,
       naturalHeight: height
     });
@@ -173,6 +209,7 @@ app.post("/api/images/upload", async (request, response) => {
     const base64 = String(request.body?.base64 || "");
     const filename = String(request.body?.filename || "");
     const mimeType = String(request.body?.mimeType || "");
+    const scoped = resolveScopedPaths(request.body?.tempProjectId);
     if (!base64) {
       response.status(400).json({ error: "base64 不能为空" });
       return;
@@ -187,11 +224,12 @@ app.post("/api/images/upload", async (request, response) => {
 
     const ext = pickExtension(filename, mimeType);
     const savedName = `${Date.now()}_${uuidv4()}${ext}`;
-    const absolutePath = path.join(imageDir, savedName);
+    await fs.mkdir(scoped.scopedImageDir, { recursive: true });
+    const absolutePath = path.join(scoped.scopedImageDir, savedName);
     await fs.writeFile(absolutePath, buffer);
 
     response.json({
-      url: `/assets/images/${savedName}`
+      url: `${scoped.imageUrlPrefix}/${savedName}`
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "上传失败";
@@ -229,6 +267,45 @@ app.get("/api/project/load", async (_request, response) => {
     }
 
     const message = error instanceof Error ? error.message : "加载失败";
+    response.status(500).json({ error: message });
+  }
+});
+
+app.post("/api/project/temp/save", async (request, response) => {
+  try {
+    const project = request.body?.project;
+    const scoped = resolveScopedPaths(request.body?.projectId);
+    if (!scoped.safeProjectId) {
+      response.status(400).json({ error: "projectId 无效" });
+      return;
+    }
+
+    if (!project || typeof project !== "object") {
+      response.status(400).json({ error: "project 数据缺失" });
+      return;
+    }
+
+    await fs.mkdir(scoped.scopedProjectDir, { recursive: true });
+    await fs.writeFile(scoped.scopedProjectFile, JSON.stringify(project, null, 2), "utf8");
+    response.json({ ok: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "临时项目保存失败";
+    response.status(500).json({ error: message });
+  }
+});
+
+app.post("/api/project/temp/clear", async (request, response) => {
+  try {
+    const scoped = resolveScopedPaths(request.body?.projectId);
+    if (!scoped.safeProjectId) {
+      response.status(400).json({ error: "projectId 无效" });
+      return;
+    }
+
+    await fs.rm(scoped.scopedProjectDir, { recursive: true, force: true });
+    response.json({ ok: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "临时项目清理失败";
     response.status(500).json({ error: message });
   }
 });

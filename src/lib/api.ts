@@ -12,6 +12,10 @@ export type UploadImageResponse = {
   naturalHeight: number;
 };
 
+type AssetStorageOptions = {
+  tempProjectId?: string;
+};
+
 async function parseJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let message = `请求失败: ${response.status}`;
@@ -28,13 +32,16 @@ async function parseJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function generateImage(payload: GeneratePayload): Promise<GenerateResponse> {
+export async function generateImage(payload: GeneratePayload, options: AssetStorageOptions = {}): Promise<GenerateResponse> {
   const response = await fetch("/api/generate", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({
+      ...payload,
+      tempProjectId: options.tempProjectId
+    })
   });
 
   return parseJson<GenerateResponse>(response);
@@ -79,7 +86,7 @@ function getImageSize(file: File): Promise<{ naturalWidth: number; naturalHeight
   });
 }
 
-export async function uploadLocalImage(file: File): Promise<UploadImageResponse> {
+export async function uploadLocalImage(file: File, options: AssetStorageOptions = {}): Promise<UploadImageResponse> {
   const [base64, size] = await Promise.all([fileToBase64(file), getImageSize(file)]);
 
   const response = await fetch("/api/images/upload", {
@@ -90,7 +97,8 @@ export async function uploadLocalImage(file: File): Promise<UploadImageResponse>
     body: JSON.stringify({
       filename: file.name,
       mimeType: file.type,
-      base64
+      base64,
+      tempProjectId: options.tempProjectId
     })
   });
 
@@ -121,4 +129,33 @@ export async function loadProject(): Promise<unknown | null> {
 
   const body = await parseJson<{ project: unknown | null }>(response);
   return body.project;
+}
+
+export async function saveTempProjectSnapshot(projectId: string, project: unknown): Promise<void> {
+  const response = await fetch("/api/project/temp/save", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      projectId,
+      project
+    })
+  });
+
+  await parseJson<{ ok: true }>(response);
+}
+
+export async function clearTempProjectSnapshot(projectId: string): Promise<void> {
+  const response = await fetch("/api/project/temp/clear", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      projectId
+    })
+  });
+
+  await parseJson<{ ok: true }>(response);
 }
