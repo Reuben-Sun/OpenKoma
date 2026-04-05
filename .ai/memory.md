@@ -565,3 +565,17 @@
       - 临时快照同样拆分保存为两个文件
 - 验证：
   - `npm run build` 通过
+
+## 2026-04-05 - 缩放控件从悬浮改为固定栏位（增量）
+
+- 目标：
+  - 去掉画布右上角悬浮缩放按钮，改为固定位置常驻，避免遮挡画布并提升观感
+- 实现：
+  - `src/components/CanvasEditor.tsx`
+    - 将编辑器根节点改为纵向布局：`flex h-full min-h-0 flex-col`
+    - 新增顶部固定缩放栏（`shrink-0`）放置 `- / 百分比 / range / +`
+    - 画布区域改为下方独立滚动容器：`min-h-0 overflow-auto`
+    - 删除原 `absolute right-3 top-3` 的悬浮缩放层
+    - 缩放逻辑保持不变（`clampZoom`、滑杆、按钮增减）
+- 验证：
+  - `npm run build` 通过

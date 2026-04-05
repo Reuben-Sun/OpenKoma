@@ -426,28 +426,62 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
   };
 
   return (
-    <div className="studio-surface relative h-full w-full overflow-auto">
-      <div className="studio-workspace min-w-fit p-6 lg:p-8">
-        <div
-          className="relative overflow-hidden rounded-xl border border-slate-300/90 bg-slate-100 shadow-[0_28px_70px_rgba(2,6,23,0.4)]"
-          style={{
-            width: Math.ceil(activePage.canvas.width * zoom),
-            height: Math.ceil(activePage.canvas.height * zoom)
-          }}
-        >
-          <Stage
-            ref={stageRef}
-            width={Math.ceil(activePage.canvas.width * zoom)}
-            height={Math.ceil(activePage.canvas.height * zoom)}
-            scaleX={zoom}
-            scaleY={zoom}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            className="bg-slate-200"
+    <div className="studio-surface flex h-full w-full min-h-0 flex-col overflow-hidden">
+      <div className="shrink-0 border-b border-[var(--panel-border)] px-3 py-2">
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            className="studio-btn h-7 w-7 px-0 text-sm leading-none"
+            onClick={() => adjustZoom(-0.05)}
+            title="缩小"
+            aria-label="缩小"
           >
-            <Layer>
-              <Rect name="canvas-bg" x={0} y={0} width={activePage.canvas.width} height={activePage.canvas.height} fill="#f8fafc" />
+            -
+          </button>
+          <label className="text-[11px] text-[var(--text-secondary)]">缩放 {Math.round(zoom * 100)}%</label>
+          <input
+            type="range"
+            min={0.1}
+            max={1}
+            step={0.01}
+            value={zoom}
+            onChange={(event) => setZoom(clampZoom(Number(event.target.value)))}
+            className="w-28 accent-[var(--accent)]"
+          />
+          <button
+            type="button"
+            className="studio-btn h-7 w-7 px-0 text-sm leading-none"
+            onClick={() => adjustZoom(0.05)}
+            title="放大"
+            aria-label="放大"
+          >
+            +
+          </button>
+        </div>
+      </div>
+
+      <div className="min-h-0 overflow-auto">
+        <div className="studio-workspace min-w-fit p-6 lg:p-8">
+          <div
+            className="relative overflow-hidden rounded-xl border border-slate-300/90 bg-slate-100 shadow-[0_28px_70px_rgba(2,6,23,0.4)]"
+            style={{
+              width: Math.ceil(activePage.canvas.width * zoom),
+              height: Math.ceil(activePage.canvas.height * zoom)
+            }}
+          >
+            <Stage
+              ref={stageRef}
+              width={Math.ceil(activePage.canvas.width * zoom)}
+              height={Math.ceil(activePage.canvas.height * zoom)}
+              scaleX={zoom}
+              scaleY={zoom}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              className="bg-slate-200"
+            >
+              <Layer>
+                <Rect name="canvas-bg" x={0} y={0} width={activePage.canvas.width} height={activePage.canvas.height} fill="#f8fafc" />
 
               {activePage.panels.map((panel) => {
                 const selected = selection?.kind === "panel" && selection.id === panel.id;
@@ -610,41 +644,9 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
                   return newBox;
                 }}
               />
-            </Layer>
-          </Stage>
-        </div>
-      </div>
-
-      <div className="pointer-events-none absolute right-3 top-3 z-20">
-        <div className="studio-subtle pointer-events-auto flex items-center gap-2 rounded-xl px-2.5 py-2">
-          <button
-            type="button"
-            className="studio-btn h-7 w-7 px-0 text-sm leading-none"
-            onClick={() => adjustZoom(-0.05)}
-            title="缩小"
-            aria-label="缩小"
-          >
-            -
-          </button>
-          <label className="text-[11px] text-[var(--text-secondary)]">缩放 {Math.round(zoom * 100)}%</label>
-          <input
-            type="range"
-            min={0.1}
-            max={1}
-            step={0.01}
-            value={zoom}
-            onChange={(event) => setZoom(clampZoom(Number(event.target.value)))}
-            className="w-28 accent-[var(--accent)]"
-          />
-          <button
-            type="button"
-            className="studio-btn h-7 w-7 px-0 text-sm leading-none"
-            onClick={() => adjustZoom(0.05)}
-            title="放大"
-            aria-label="放大"
-          >
-            +
-          </button>
+              </Layer>
+            </Stage>
+          </div>
         </div>
       </div>
     </div>
