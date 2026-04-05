@@ -8,9 +8,20 @@ const compactInputClass = "studio-input h-8 min-w-[180px] flex-1 px-3 text-sm fo
 const compactButtonClass = "studio-btn h-8 px-2.5 text-xs";
 const primaryButtonClass = `${buttonClass} studio-btn-primary`;
 const dangerButtonClass = `${buttonClass} studio-btn-danger`;
-const compactPrimaryButtonClass = `${compactButtonClass} studio-btn-primary`;
 const groupClass = "studio-subtle space-y-2 rounded-2xl p-3";
 const groupTitleClass = "text-[11px] uppercase tracking-[0.16em] text-[var(--text-secondary)]";
+
+type ToolCategory = "canvas" | "layout" | "style" | "objects" | "export";
+
+const categories: ToolCategory[] = ["canvas", "layout", "style", "objects", "export"];
+
+const categoryTitleMap: Record<ToolCategory, string> = {
+  canvas: "画布设置",
+  layout: "分镜布局",
+  style: "批量样式",
+  objects: "对象",
+  export: "导出"
+};
 
 type ToolbarProps = {
   onExportPng: () => Promise<void>;
@@ -52,7 +63,7 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
   const [allRounded, setAllRounded] = useState(true);
   const [allRadius, setAllRadius] = useState(14);
   const [allBorderWidth, setAllBorderWidth] = useState(4);
-  const [expanded, setExpanded] = useState(false);
+  const [activeCategory, setActiveCategory] = useState<ToolCategory | null>(null);
 
   useEffect(() => {
     setCanvasWidth(activePage.canvas.width);
@@ -70,23 +81,27 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
   }, [activePage.panels]);
 
   useEffect(() => {
-    if (!expanded) {
+    if (!activeCategory) {
       return;
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setExpanded(false);
+        setActiveCategory(null);
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [expanded]);
+  }, [activeCategory]);
 
   const applyCanvasSize = (event: FormEvent) => {
     event.preventDefault();
     setCanvasSize(canvasWidth, canvasHeight);
+  };
+
+  const toggleCategory = (category: ToolCategory) => {
+    setActiveCategory((current) => (current === category ? null : category));
   };
 
   return (
@@ -123,189 +138,209 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
         >
           {busy.loadingProject ? "加载中..." : "加载项目"}
         </button>
-        <button className={compactButtonClass} onClick={() => void onExportPng()}>
-          PNG
-        </button>
-        <button className={compactButtonClass} onClick={() => void onExportPdf()}>
-          PDF
-        </button>
-        <button className={compactPrimaryButtonClass} onClick={() => setExpanded((prev) => !prev)}>
-          {expanded ? "收起工具" : "展开工具"}
-        </button>
+        <div className="ml-auto flex items-center gap-1.5">
+          {categories.map((category) => (
+            <button
+              key={category}
+              className={`${compactButtonClass} ${activeCategory === category ? "studio-btn-primary" : ""}`}
+              onClick={() => toggleCategory(category)}
+            >
+              {categoryTitleMap[category]}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {expanded ? (
+      {activeCategory ? (
         <>
           <button
             className="fixed inset-0 z-40 bg-[rgba(2,8,14,0.36)] backdrop-blur-[1px]"
             type="button"
             aria-label="关闭工具抽屉"
-            onClick={() => setExpanded(false)}
+            onClick={() => setActiveCategory(null)}
           />
 
           <aside className="studio-surface fixed right-3 top-[84px] z-50 w-[340px] max-w-[92vw] max-h-[calc(100vh-96px)] overflow-auto p-3">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">工具抽屉</span>
-              <button className={compactButtonClass} onClick={() => setExpanded(false)}>
+              <span className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+                {categoryTitleMap[activeCategory]}工具
+              </span>
+              <button className={compactButtonClass} onClick={() => setActiveCategory(null)}>
                 关闭
               </button>
             </div>
 
-            <section className={groupClass}>
-              <p className={groupTitleClass}>画布设置</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <select
-                  className={`${selectClass} min-w-[96px]`}
-                  value={activePage.canvas.preset ?? "custom"}
-                  onChange={(event) => setCanvasPreset(event.target.value as "A4" | "A3" | "custom")}
-                >
-                  <option value="A4">A4</option>
-                  <option value="A3">A3</option>
-                  <option value="custom">Custom</option>
-                </select>
-                <form className="flex items-center gap-2" onSubmit={applyCanvasSize}>
+            {activeCategory === "canvas" ? (
+              <section className={groupClass}>
+                <p className={groupTitleClass}>画布设置</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    className={`${selectClass} min-w-[96px]`}
+                    value={activePage.canvas.preset ?? "custom"}
+                    onChange={(event) => setCanvasPreset(event.target.value as "A4" | "A3" | "custom")}
+                  >
+                    <option value="A4">A4</option>
+                    <option value="A3">A3</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                  <form className="flex items-center gap-2" onSubmit={applyCanvasSize}>
+                    <input
+                      className={`${inputClass} w-24 px-2`}
+                      type="number"
+                      value={canvasWidth}
+                      onChange={(event) => setCanvasWidth(Number(event.target.value))}
+                    />
+                    <span className="text-[var(--text-secondary)]">x</span>
+                    <input
+                      className={`${inputClass} w-24 px-2`}
+                      type="number"
+                      value={canvasHeight}
+                      onChange={(event) => setCanvasHeight(Number(event.target.value))}
+                    />
+                    <button type="submit" className={primaryButtonClass}>
+                      应用画布
+                    </button>
+                  </form>
+                </div>
+              </section>
+            ) : null}
+
+            {activeCategory === "layout" ? (
+              <section className={groupClass}>
+                <p className={groupTitleClass}>分镜布局</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-[var(--text-secondary)]">网格切割</span>
                   <input
-                    className={`${inputClass} w-24 px-2`}
+                    className={`${inputClass} w-16 px-2`}
                     type="number"
-                    value={canvasWidth}
-                    onChange={(event) => setCanvasWidth(Number(event.target.value))}
+                    min={1}
+                    value={gridRows}
+                    onChange={(event) => setGridRows(Number(event.target.value))}
                   />
                   <span className="text-[var(--text-secondary)]">x</span>
                   <input
-                    className={`${inputClass} w-24 px-2`}
+                    className={`${inputClass} w-16 px-2`}
                     type="number"
-                    value={canvasHeight}
-                    onChange={(event) => setCanvasHeight(Number(event.target.value))}
+                    min={1}
+                    value={gridCols}
+                    onChange={(event) => setGridCols(Number(event.target.value))}
                   />
-                  <button type="submit" className={primaryButtonClass}>
-                    应用画布
+                  <button className={buttonClass} onClick={() => splitGrid(gridRows, gridCols)}>
+                    切割画布
                   </button>
-                </form>
-              </div>
-            </section>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    className={`${buttonClass} ${manualPanelMode ? "border-cyan-300/70 bg-cyan-500/25" : ""}`}
+                    onClick={() => toggleManualPanelMode()}
+                  >
+                    手绘分镜
+                  </button>
+                  <button
+                    className={`${buttonClass} ${snapSizeTo16 ? "border-emerald-300/70 bg-emerald-500/25" : ""}`}
+                    onClick={() => toggleSnapSizeTo16()}
+                  >
+                    16 倍数尺寸
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-[var(--text-secondary)]">选中分镜二次切割</span>
+                  <input
+                    className={`${inputClass} w-16 px-2`}
+                    type="number"
+                    min={1}
+                    value={splitRows}
+                    onChange={(event) => setSplitRows(Number(event.target.value))}
+                  />
+                  <span className="text-[var(--text-secondary)]">x</span>
+                  <input
+                    className={`${inputClass} w-16 px-2`}
+                    type="number"
+                    min={1}
+                    value={splitCols}
+                    onChange={(event) => setSplitCols(Number(event.target.value))}
+                  />
+                  <button className={buttonClass} onClick={() => splitSelectedPanel(splitRows, splitCols)}>
+                    应用
+                  </button>
+                </div>
+              </section>
+            ) : null}
 
-            <section className={groupClass}>
-              <p className={groupTitleClass}>分镜布局</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-[var(--text-secondary)]">网格切割</span>
-                <input
-                  className={`${inputClass} w-16 px-2`}
-                  type="number"
-                  min={1}
-                  value={gridRows}
-                  onChange={(event) => setGridRows(Number(event.target.value))}
-                />
-                <span className="text-[var(--text-secondary)]">x</span>
-                <input
-                  className={`${inputClass} w-16 px-2`}
-                  type="number"
-                  min={1}
-                  value={gridCols}
-                  onChange={(event) => setGridCols(Number(event.target.value))}
-                />
-                <button className={buttonClass} onClick={() => splitGrid(gridRows, gridCols)}>
-                  切割画布
-                </button>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  className={`${buttonClass} ${manualPanelMode ? "border-cyan-300/70 bg-cyan-500/25" : ""}`}
-                  onClick={() => toggleManualPanelMode()}
-                >
-                  手绘分镜
-                </button>
-                <button
-                  className={`${buttonClass} ${snapSizeTo16 ? "border-emerald-300/70 bg-emerald-500/25" : ""}`}
-                  onClick={() => toggleSnapSizeTo16()}
-                >
-                  16 倍数尺寸
-                </button>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-[var(--text-secondary)]">选中分镜二次切割</span>
-                <input
-                  className={`${inputClass} w-16 px-2`}
-                  type="number"
-                  min={1}
-                  value={splitRows}
-                  onChange={(event) => setSplitRows(Number(event.target.value))}
-                />
-                <span className="text-[var(--text-secondary)]">x</span>
-                <input
-                  className={`${inputClass} w-16 px-2`}
-                  type="number"
-                  min={1}
-                  value={splitCols}
-                  onChange={(event) => setSplitCols(Number(event.target.value))}
-                />
-                <button className={buttonClass} onClick={() => splitSelectedPanel(splitRows, splitCols)}>
-                  应用
-                </button>
-              </div>
-            </section>
+            {activeCategory === "style" ? (
+              <section className={groupClass}>
+                <p className={groupTitleClass}>批量样式</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
+                    <input type="checkbox" checked={allRounded} onChange={(event) => setAllRounded(event.target.checked)} />
+                    圆角
+                  </label>
+                  <input
+                    className={`${inputClass} w-20 px-2`}
+                    type="number"
+                    min={0}
+                    value={allRadius}
+                    disabled={!allRounded}
+                    onChange={(event) => setAllRadius(Math.max(0, Number(event.target.value)))}
+                  />
+                  <span className="text-xs text-[var(--text-secondary)]">边框</span>
+                  <input
+                    className={`${inputClass} w-20 px-2`}
+                    type="number"
+                    min={0}
+                    value={allBorderWidth}
+                    onChange={(event) => setAllBorderWidth(Math.max(0, Number(event.target.value)))}
+                  />
+                  <button
+                    className={primaryButtonClass}
+                    onClick={() =>
+                      setAllPanelsStyle({
+                        borderRadius: allRounded ? allRadius : 0,
+                        borderWidth: allBorderWidth
+                      })
+                    }
+                  >
+                    应用到全部分镜
+                  </button>
+                </div>
+              </section>
+            ) : null}
 
-            <section className={groupClass}>
-              <p className={groupTitleClass}>批量样式</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <label className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
-                  <input type="checkbox" checked={allRounded} onChange={(event) => setAllRounded(event.target.checked)} />
-                  圆角
-                </label>
-                <input
-                  className={`${inputClass} w-20 px-2`}
-                  type="number"
-                  min={0}
-                  value={allRadius}
-                  disabled={!allRounded}
-                  onChange={(event) => setAllRadius(Math.max(0, Number(event.target.value)))}
-                />
-                <span className="text-xs text-[var(--text-secondary)]">边框</span>
-                <input
-                  className={`${inputClass} w-20 px-2`}
-                  type="number"
-                  min={0}
-                  value={allBorderWidth}
-                  onChange={(event) => setAllBorderWidth(Math.max(0, Number(event.target.value)))}
-                />
-                <button
-                  className={primaryButtonClass}
-                  onClick={() =>
-                    setAllPanelsStyle({
-                      borderRadius: allRounded ? allRadius : 0,
-                      borderWidth: allBorderWidth
-                    })
-                  }
-                >
-                  应用到全部分镜
-                </button>
-              </div>
-            </section>
+            {activeCategory === "objects" ? (
+              <section className={groupClass}>
+                <p className={groupTitleClass}>对象</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button className={buttonClass} onClick={() => addBubble("rect")}>
+                    新建矩形气泡
+                  </button>
+                  <button className={buttonClass} onClick={() => addBubble("rounded")}>
+                    新建圆角气泡
+                  </button>
+                  <button className={buttonClass} onClick={() => addBubble("circle")}>
+                    新建圆形气泡
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button className={dangerButtonClass} disabled={!selection} onClick={() => deleteSelection()}>
+                    删除选中对象
+                  </button>
+                </div>
+              </section>
+            ) : null}
 
-            <section className={groupClass}>
-              <p className={groupTitleClass}>对象与导出</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <button className={buttonClass} onClick={() => addBubble("rect")}>
-                  新建矩形气泡
-                </button>
-                <button className={buttonClass} onClick={() => addBubble("rounded")}>
-                  新建圆角气泡
-                </button>
-                <button className={buttonClass} onClick={() => addBubble("circle")}>
-                  新建圆形气泡
-                </button>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button className={primaryButtonClass} onClick={() => void onExportPng()}>
-                  导出 PNG
-                </button>
-                <button className={primaryButtonClass} onClick={() => void onExportPdf()}>
-                  导出 PDF
-                </button>
-                <button className={dangerButtonClass} disabled={!selection} onClick={() => deleteSelection()}>
-                  删除选中对象
-                </button>
-              </div>
-            </section>
+            {activeCategory === "export" ? (
+              <section className={groupClass}>
+                <p className={groupTitleClass}>导出</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button className={primaryButtonClass} onClick={() => void onExportPng()}>
+                    导出 PNG（当前页）
+                  </button>
+                  <button className={primaryButtonClass} onClick={() => void onExportPdf()}>
+                    导出 PDF（全部页）
+                  </button>
+                </div>
+              </section>
+            ) : null}
           </aside>
         </>
       ) : null}
