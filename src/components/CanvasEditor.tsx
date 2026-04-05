@@ -48,6 +48,35 @@ function waitForStageRefresh(): Promise<void> {
   });
 }
 
+type PathDrawingContext = Pick<CanvasRenderingContext2D, "rect" | "moveTo" | "lineTo" | "quadraticCurveTo">;
+
+function roundedRectPath(
+  context: PathDrawingContext,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number
+) {
+  const safeRadius = Math.max(0, Math.min(radius, width / 2, height / 2));
+  if (safeRadius === 0) {
+    context.rect(x, y, width, height);
+    return;
+  }
+
+  const right = x + width;
+  const bottom = y + height;
+  context.moveTo(x + safeRadius, y);
+  context.lineTo(right - safeRadius, y);
+  context.quadraticCurveTo(right, y, right, y + safeRadius);
+  context.lineTo(right, bottom - safeRadius);
+  context.quadraticCurveTo(right, bottom, right - safeRadius, bottom);
+  context.lineTo(x + safeRadius, bottom);
+  context.quadraticCurveTo(x, bottom, x, bottom - safeRadius);
+  context.lineTo(x, y + safeRadius);
+  context.quadraticCurveTo(x, y, x + safeRadius, y);
+}
+
 function PanelImageLayer({ panel }: { panel: Panel }) {
   const imageUrl = panel.image?.original ?? "";
   const [image] = useImage(imageUrl, "anonymous");
@@ -68,9 +97,18 @@ function PanelImageLayer({ panel }: { panel: Panel }) {
   const drawHeight = sourceHeight * drawScale;
   const offsetX = panel.gap + (innerWidth - drawWidth) / 2;
   const offsetY = panel.gap + (innerHeight - drawHeight) / 2;
+  const clipX = panel.gap;
+  const clipY = panel.gap;
+  const clipRadius = Math.max(0, panel.borderRadius - panel.gap);
 
   return (
-    <Group clipX={panel.gap} clipY={panel.gap} clipWidth={innerWidth} clipHeight={innerHeight}>
+    <Group
+      clipFunc={(context) => {
+        context.beginPath();
+        roundedRectPath(context, clipX, clipY, innerWidth, innerHeight, clipRadius);
+        context.closePath();
+      }}
+    >
       <KonvaImage
         image={image}
         x={offsetX}
@@ -484,10 +522,17 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
                       height={panel.height}
                       fill="#ffffff"
                       cornerRadius={panel.borderRadius}
-                      stroke={selected ? "#2563eb" : panel.borderColor}
-                      strokeWidth={selected ? panel.borderWidth + 1 : panel.borderWidth}
                     />
                     <PanelImageLayer panel={panel} />
+                    <Rect
+                      width={panel.width}
+                      height={panel.height}
+                      cornerRadius={panel.borderRadius}
+                      stroke={selected ? "#2563eb" : panel.borderColor}
+                      strokeWidth={selected ? panel.borderWidth + 1 : panel.borderWidth}
+                      fillEnabled={false}
+                      listening={false}
+                    />
                   </Group>
                 );
               })}
