@@ -1,6 +1,6 @@
 import { ChangeEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Bubble, CropConfig, Panel } from "../types";
-import { useEditorStore } from "../lib/store";
+import { getActivePage, useEditorStore } from "../lib/store";
 
 const containerClass =
   "h-full overflow-auto rounded-2xl border border-slate-700 bg-ink-900 p-4 text-slate-100 shadow-panel";
@@ -816,13 +816,13 @@ function BubbleInspector({ bubble }: { bubble: Bubble }) {
 }
 
 export default function InspectorPanel() {
-  const project = useEditorStore((state) => state.project);
+  const activePage = useEditorStore((state) => getActivePage(state.project));
   const selection = useEditorStore((state) => state.selection);
 
   const selectedPanel =
-    selection?.kind === "panel" ? project.panels.find((panel) => panel.id === selection.id) : undefined;
+    selection?.kind === "panel" ? activePage.panels.find((panel) => panel.id === selection.id) : undefined;
   const selectedBubble =
-    selection?.kind === "bubble" ? project.bubbles.find((bubble) => bubble.id === selection.id) : undefined;
+    selection?.kind === "bubble" ? activePage.bubbles.find((bubble) => bubble.id === selection.id) : undefined;
 
   return (
     <aside className={containerClass}>

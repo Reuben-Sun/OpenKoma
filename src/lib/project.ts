@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { Bubble, BubbleType, CanvasPreset, Panel, Project } from "../types";
+import { Bubble, BubbleType, CanvasConfig, CanvasPreset, Panel, Project, ProjectPage } from "../types";
 
 export const CANVAS_PRESETS: Record<CanvasPreset, { width: number; height: number; dpi: number }> = {
   A4: {
@@ -18,6 +18,16 @@ export const CANVAS_PRESETS: Record<CanvasPreset, { width: number; height: numbe
     dpi: 300
   }
 };
+
+export function createCanvasFromPreset(preset: CanvasPreset = "A4"): CanvasConfig {
+  const picked = CANVAS_PRESETS[preset];
+  return {
+    width: picked.width,
+    height: picked.height,
+    preset,
+    dpi: picked.dpi
+  };
+}
 
 const DEFAULT_PANEL_STYLE: Pick<Panel, "borderColor" | "borderRadius" | "borderWidth" | "gap"> = {
   borderWidth: 4,
@@ -61,27 +71,47 @@ export function createBubble(type: BubbleType): Bubble {
   };
 }
 
+type CreatePageInput = {
+  id?: string;
+  name?: string;
+  canvas?: CanvasConfig;
+  panels?: Panel[];
+  bubbles?: Bubble[];
+  withDefaultPanel?: boolean;
+};
+
+export function createProjectPage(input: CreatePageInput = {}): ProjectPage {
+  const canvas = input.canvas ?? createCanvasFromPreset("A4");
+  const panels =
+    input.panels ??
+    (input.withDefaultPanel === false
+      ? []
+      : [
+          createPanel({
+            x: 40,
+            y: 40,
+            width: canvas.width - 80,
+            height: canvas.height - 80,
+            prompt: "漫画分镜，一个少年站在雨中，赛博朋克风格，高细节"
+          })
+        ]);
+
+  return {
+    id: input.id ?? uuidv4(),
+    name: input.name ?? "第 1 页",
+    canvas,
+    panels,
+    bubbles: input.bubbles ?? []
+  };
+}
+
 export function createEmptyProject(name = "未命名项目"): Project {
-  const preset = CANVAS_PRESETS.A4;
+  const firstPage = createProjectPage();
   return {
     id: uuidv4(),
     name,
-    canvas: {
-      width: preset.width,
-      height: preset.height,
-      preset: "A4",
-      dpi: preset.dpi
-    },
-    panels: [
-      createPanel({
-        x: 40,
-        y: 40,
-        width: preset.width - 80,
-        height: preset.height - 80,
-        prompt: "漫画分镜，一个少年站在雨中，赛博朋克风格，高细节"
-      })
-    ],
-    bubbles: []
+    pages: [firstPage],
+    activePageId: firstPage.id
   };
 }
 

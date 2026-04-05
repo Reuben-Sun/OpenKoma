@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { useEditorStore } from "../lib/store";
+import { getActivePage, useEditorStore } from "../lib/store";
 
 const inputClass =
   "rounded-lg border border-slate-600 bg-ink-800 px-3 py-1 text-sm text-slate-100 outline-none ring-blue-500 transition focus:ring";
@@ -14,6 +14,7 @@ type ToolbarProps = {
 
 export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
   const project = useEditorStore((state) => state.project);
+  const activePage = useEditorStore((state) => getActivePage(state.project));
   const selection = useEditorStore((state) => state.selection);
   const manualPanelMode = useEditorStore((state) => state.manualPanelMode);
   const snapSizeTo16 = useEditorStore((state) => state.snapSizeTo16);
@@ -37,8 +38,8 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
   const loadProject = useEditorStore((state) => state.loadProject);
   const deleteSelection = useEditorStore((state) => state.deleteSelection);
 
-  const [canvasWidth, setCanvasWidth] = useState(project.canvas.width);
-  const [canvasHeight, setCanvasHeight] = useState(project.canvas.height);
+  const [canvasWidth, setCanvasWidth] = useState(activePage.canvas.width);
+  const [canvasHeight, setCanvasHeight] = useState(activePage.canvas.height);
   const [gridRows, setGridRows] = useState(2);
   const [gridCols, setGridCols] = useState(2);
   const [splitRows, setSplitRows] = useState(2);
@@ -48,19 +49,19 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
   const [allBorderWidth, setAllBorderWidth] = useState(4);
 
   useEffect(() => {
-    setCanvasWidth(project.canvas.width);
-    setCanvasHeight(project.canvas.height);
-  }, [project.canvas.height, project.canvas.width]);
+    setCanvasWidth(activePage.canvas.width);
+    setCanvasHeight(activePage.canvas.height);
+  }, [activePage.canvas.height, activePage.canvas.width, activePage.id]);
 
   useEffect(() => {
-    const sample = project.panels[0];
+    const sample = activePage.panels[0];
     if (!sample) {
       return;
     }
     setAllRounded(sample.borderRadius > 0);
     setAllRadius(sample.borderRadius || 14);
     setAllBorderWidth(sample.borderWidth);
-  }, [project.panels]);
+  }, [activePage.panels]);
 
   const applyCanvasSize = (event: FormEvent) => {
     event.preventDefault();
@@ -79,7 +80,7 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
 
         <select
           className={inputClass}
-          value={project.canvas.preset ?? "custom"}
+          value={activePage.canvas.preset ?? "custom"}
           onChange={(event) => setCanvasPreset(event.target.value as "A4" | "A3" | "custom")}
         >
           <option value="A4">A4</option>

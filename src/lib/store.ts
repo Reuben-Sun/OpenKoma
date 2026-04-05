@@ -2,8 +2,16 @@ import { create } from "zustand";
 import { v4 as uuidv4 } from "uuid";
 import { applyPatch, compare, type Operation } from "fast-json-patch";
 import { generateImage, loadProject as loadProjectApi, saveProject as saveProjectApi, uploadLocalImage } from "./api";
-import { clamp, createBubble as createBubbleFactory, createEmptyProject, createPanel, splitGridPanels } from "./project";
-import { Bubble, BubbleType, CanvasPreset, CropConfig, Panel, Project, Selection } from "../types";
+import {
+  clamp,
+  createBubble as createBubbleFactory,
+  createCanvasFromPreset,
+  createEmptyProject,
+  createPanel,
+  createProjectPage,
+  splitGridPanels
+} from "./project";
+import { Bubble, BubbleType, CanvasPreset, CropConfig, Panel, Project, ProjectPage, Selection } from "../types";
 
 type HistoryEntry = {
   forward: Operation[];
@@ -35,6 +43,11 @@ type EditorStore = {
   setCanvasSize: (width: number, height: number) => void;
   setAllPanelsStyle: (style: { borderRadius?: number; borderWidth?: number }) => void;
 
+  setActivePage: (id: string) => void;
+  addPage: () => void;
+  deletePage: (id: string) => void;
+  movePage: (id: string, direction: "up" | "down") => void;
+
   splitGrid: (rows: number, cols: number) => void;
   splitSelectedPanel: (rows: number, cols: number) => void;
   createPanelFromRect: (x: number, y: number, width: number, height: number) => void;
@@ -60,6 +73,16 @@ type EditorStore = {
 
   saveProject: () => Promise<void>;
   loadProject: () => Promise<void>;
+};
+
+type LegacyProject = {
+  id?: string;
+  name?: string;
+  canvas?: ProjectPage["canvas"];
+  panels?: Panel[];
+  bubbles?: Bubble[];
+  pages?: ProjectPage[];
+  activePageId?: string;
 };
 
 const HISTORY_LIMIT = 80;
@@ -111,6 +134,161 @@ function sanitizePanel(panel: Panel): Panel {
     borderWidth: Math.max(0, panel.borderWidth),
     gap: Math.max(0, panel.gap)
   };
+}
+
+function sanitizeCanvas(canvas: Partial<ProjectPage["canvas"]> | undefined): ProjectPage["canvas"] {
+  const fallback = createCanvasFromPreset("A4");
+  const width = Number(canvas?.width ?? fallback.width);
+  const height = Number(canvas?.height ?? fallback.height);
+  const dpi = Number(canvas?.dpi ?? fallback.dpi);
+  const preset = canvas?.preset;
+
+  return {
+    width: Math.max(240, Math.round(Number.isFinite(width) ? width : fallback.width)),
+    height: Math.max(240, Math.round(Number.isFinite(height) ? height : fallback.height)),
+    dpi: Math.max(72, Math.round(Number.isFinite(dpi) ? dpi : fallback.dpi ?? 300)),
+    preset: preset === "A3" || preset === "A4" || preset === "custom" ? preset : "custom"
+  };
+}
+
+function sanitizePage(page: Partial<ProjectPage> | undefined, index: number): ProjectPage {
+  const fallbackName = `第 ${index + 1} 页`;
+  const safePanels = Array.isArray(page?.panels) ? page.panels.map((entry) => sanitizePanel(entry)) : [];
+  const safeBubbles = Array.isArray(page?.bubbles) ? page.bubbles : [];
+
+  return {
+    id: page?.id || uuidv4(),
+    name: (typeof page?.name === "string" && page.name.trim()) || fallbackName,
+    canvas: sanitizeCanvas(page?.canvas),
+    panels: safePanels,
+    bubbles: safeBubbles
+  };
+}
+
+function normalizeLoadedProject(loaded: LegacyProject): Project {
+  if (Array.isArray(loaded.pages) && loaded.pages.length > 0) {
+    const pages = loaded.pages.map((page, index) => sanitizePage(page, index));
+    const activePageId =
+      loaded.activePageId && pages.some((page) => page.id === loaded.activePageId) ? loaded.activePageId : pages[0].id;
+    return {
+      id: loaded.id || uuidv4(),
+      name: (typeof loaded.name === "string" && loaded.name.trim()) || "未命名项目",
+      pages,
+      activePageId
+    };
+  }
+
+  const fallbackPage = sanitizePage(
+    {
+      id: uuidv4(),
+      name: "第 1 页",
+      canvas: loaded.canvas,
+      panels: loaded.panels,
+      bubbles: loaded.bubbles
+    },
+    0
+  );
+
+  if (fallbackPage.panels.length === 0) {
+    const defaultPanel = createPanel({
+      x: 40,
+      y: 40,
+      width: fallbackPage.canvas.width - 80,
+      height: fallbackPage.canvas.height - 80,
+      prompt: "漫画分镜，一个少年站在雨中，赛博朋克风格，高细节"
+    });
+    fallbackPage.panels = [defaultPanel];
+  }
+
+  return {
+    id: loaded.id || uuidv4(),
+    name: (typeof loaded.name === "string" && loaded.name.trim()) || "未命名项目",
+    pages: [fallbackPage],
+    activePageId: fallbackPage.id
+  };
+}
+
+function getActivePageIndex(project: Project): number {
+  if (project.pages.length === 0) {
+    return -1;
+  }
+  const found = project.pages.findIndex((page) => page.id === project.activePageId);
+  return found >= 0 ? found : 0;
+}
+
+export function getActivePage(project: Project): ProjectPage {
+  const index = getActivePageIndex(project);
+  if (index >= 0) {
+    return project.pages[index];
+  }
+  return createProjectPage({ name: "第 1 页" });
+}
+
+function updatePageAt(project: Project, index: number, updater: (page: ProjectPage) => ProjectPage): Project {
+  if (index < 0 || index >= project.pages.length) {
+    return project;
+  }
+
+  const nextPages = project.pages.map((page, pageIndex) => {
+    if (pageIndex !== index) {
+      return page;
+    }
+    return updater(page);
+  });
+
+  return {
+    ...project,
+    pages: nextPages,
+    activePageId: nextPages[index].id
+  };
+}
+
+function updateActivePage(project: Project, updater: (page: ProjectPage) => ProjectPage): Project {
+  return updatePageAt(project, getActivePageIndex(project), updater);
+}
+
+function updateProjectPanelById(project: Project, id: string, updater: (panel: Panel) => Panel): Project | null {
+  let touched = false;
+
+  const nextPages = project.pages.map((page) => {
+    let pageTouched = false;
+    const nextPanels = page.panels.map((panel) => {
+      if (panel.id !== id) {
+        return panel;
+      }
+      touched = true;
+      pageTouched = true;
+      return updater(panel);
+    });
+
+    if (!pageTouched) {
+      return page;
+    }
+
+    return {
+      ...page,
+      panels: nextPanels
+    };
+  });
+
+  if (!touched) {
+    return null;
+  }
+
+  return {
+    ...project,
+    pages: nextPages
+  };
+}
+
+function findPanel(project: Project, id: string): Panel | undefined {
+  for (const page of project.pages) {
+    const panel = page.panels.find((entry) => entry.id === id);
+    if (panel) {
+      return panel;
+    }
+  }
+  return undefined;
 }
 
 function getPanelFrameRatio(panel: Pick<Panel, "width" | "height" | "gap">): number {
@@ -184,8 +362,8 @@ function replacePanel(panels: Panel[], id: string, patch: Partial<Panel>): Panel
   });
 }
 
-function findPanel(project: Project, id: string): Panel | undefined {
-  return project.panels.find((panel) => panel.id === id);
+function createNewPageName(project: Project): string {
+  return `第 ${project.pages.length + 1} 页`;
 }
 
 export const useEditorStore = create<EditorStore>((set, get) => ({
@@ -272,23 +450,17 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   },
 
   setCanvasPreset: (preset) => {
-    const presets = {
-      A4: { width: 2480, height: 3508, dpi: 300 },
-      A3: { width: 3508, height: 4961, dpi: 300 },
-      custom: { width: 1600, height: 2400, dpi: 300 }
-    };
-
-    const picked = presets[preset];
+    const picked = createCanvasFromPreset(preset);
     set((state) => {
-      const nextProject: Project = {
-        ...state.project,
+      const nextProject = updateActivePage(state.project, (page) => ({
+        ...page,
         canvas: {
           width: picked.width,
           height: picked.height,
           dpi: picked.dpi,
           preset
         }
-      };
+      }));
 
       const historyState = withHistory(state, nextProject);
       if (!historyState) {
@@ -304,15 +476,15 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   setCanvasSize: (width, height) => {
     set((state) => {
-      const nextProject: Project = {
-        ...state.project,
+      const nextProject = updateActivePage(state.project, (page) => ({
+        ...page,
         canvas: {
-          ...state.project.canvas,
+          ...page.canvas,
           width: Math.max(240, Math.round(width)),
           height: Math.max(240, Math.round(height)),
           preset: "custom"
         }
-      };
+      }));
 
       const historyState = withHistory(state, nextProject);
       if (!historyState) {
@@ -327,24 +499,23 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   setAllPanelsStyle: (style) => {
     set((state) => {
-      if (state.project.panels.length === 0) {
+      const activePage = getActivePage(state.project);
+      if (activePage.panels.length === 0) {
         return {
           notice: "当前没有分镜"
         };
       }
 
-      const nextPanels = state.project.panels.map((panel) =>
-        sanitizePanel({
-          ...panel,
-          borderRadius: style.borderRadius === undefined ? panel.borderRadius : style.borderRadius,
-          borderWidth: style.borderWidth === undefined ? panel.borderWidth : style.borderWidth
-        })
-      );
-
-      const nextProject: Project = {
-        ...state.project,
-        panels: nextPanels
-      };
+      const nextProject = updateActivePage(state.project, (page) => ({
+        ...page,
+        panels: page.panels.map((panel) =>
+          sanitizePanel({
+            ...panel,
+            borderRadius: style.borderRadius === undefined ? panel.borderRadius : style.borderRadius,
+            borderWidth: style.borderWidth === undefined ? panel.borderWidth : style.borderWidth
+          })
+        )
+      }));
 
       const historyState = withHistory(state, nextProject);
       if (!historyState) {
@@ -360,15 +531,132 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     });
   },
 
+  setActivePage: (id) => {
+    set((state) => {
+      if (state.project.activePageId === id || !state.project.pages.some((page) => page.id === id)) {
+        return state;
+      }
+      return {
+        project: {
+          ...state.project,
+          activePageId: id
+        },
+        selection: undefined
+      };
+    });
+  },
+
+  addPage: () => {
+    set((state) => {
+      const activePage = getActivePage(state.project);
+      const newPage = createProjectPage({
+        name: createNewPageName(state.project),
+        canvas: {
+          ...activePage.canvas
+        }
+      });
+
+      const nextProject: Project = {
+        ...state.project,
+        pages: [...state.project.pages, newPage],
+        activePageId: newPage.id
+      };
+
+      const historyState = withHistory(state, nextProject);
+      if (!historyState) {
+        return state;
+      }
+
+      return {
+        ...historyState,
+        selection: undefined,
+        notice: "已新增页面"
+      };
+    });
+  },
+
+  deletePage: (id) => {
+    set((state) => {
+      if (state.project.pages.length <= 1) {
+        return {
+          notice: "至少保留 1 页"
+        };
+      }
+
+      const index = state.project.pages.findIndex((page) => page.id === id);
+      if (index < 0) {
+        return state;
+      }
+
+      const nextPages = state.project.pages.filter((page) => page.id !== id);
+      const nextActive =
+        state.project.activePageId === id
+          ? nextPages[Math.min(index, nextPages.length - 1)].id
+          : state.project.activePageId;
+
+      const nextProject: Project = {
+        ...state.project,
+        pages: nextPages,
+        activePageId: nextActive
+      };
+
+      const historyState = withHistory(state, nextProject);
+      if (!historyState) {
+        return state;
+      }
+
+      return {
+        ...historyState,
+        selection: undefined,
+        notice: "已删除页面"
+      };
+    });
+  },
+
+  movePage: (id, direction) => {
+    set((state) => {
+      const index = state.project.pages.findIndex((page) => page.id === id);
+      if (index < 0) {
+        return state;
+      }
+
+      const targetIndex = direction === "up" ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= state.project.pages.length) {
+        return state;
+      }
+
+      const nextPages = [...state.project.pages];
+      const temp = nextPages[index];
+      nextPages[index] = nextPages[targetIndex];
+      nextPages[targetIndex] = temp;
+
+      const nextProject: Project = {
+        ...state.project,
+        pages: nextPages
+      };
+
+      const historyState = withHistory(state, nextProject);
+      if (!historyState) {
+        return state;
+      }
+
+      return {
+        ...historyState,
+        notice: direction === "up" ? "页面已上移" : "页面已下移"
+      };
+    });
+  },
+
   splitGrid: (rows, cols) => {
     const safeRows = Math.max(1, Math.floor(rows));
     const safeCols = Math.max(1, Math.floor(cols));
 
     set((state) => {
-      const nextProject: Project = {
-        ...state.project,
-        panels: splitGridPanels(state.project.canvas.width, state.project.canvas.height, safeRows, safeCols)
-      };
+      const activePage = getActivePage(state.project);
+      const nextProject = updateActivePage(state.project, (page) => ({
+        ...page,
+        panels: splitGridPanels(activePage.canvas.width, activePage.canvas.height, safeRows, safeCols)
+      }));
 
       const historyState = withHistory(state, nextProject);
       if (!historyState) {
@@ -394,7 +682,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     const safeCols = Math.max(1, Math.floor(cols));
 
     set((state) => {
-      const target = state.project.panels.find((panel) => panel.id === selected.id);
+      const activePage = getActivePage(state.project);
+      const target = activePage.panels.find((panel) => panel.id === selected.id);
       if (!target) {
         return state;
       }
@@ -426,10 +715,10 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         }
       }
 
-      const nextProject: Project = {
-        ...state.project,
-        panels: [...state.project.panels.filter((panel) => panel.id !== target.id), ...children]
-      };
+      const nextProject = updateActivePage(state.project, (page) => ({
+        ...page,
+        panels: [...page.panels.filter((panel) => panel.id !== target.id), ...children]
+      }));
 
       const historyState = withHistory(state, nextProject);
       if (!historyState) {
@@ -465,10 +754,10 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     });
 
     set((state) => {
-      const nextProject: Project = {
-        ...state.project,
-        panels: [...state.project.panels, panel]
-      };
+      const nextProject = updateActivePage(state.project, (page) => ({
+        ...page,
+        panels: [...page.panels, panel]
+      }));
 
       const historyState = withHistory(state, nextProject);
       if (!historyState) {
@@ -513,12 +802,18 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         return state;
       }
 
+      const activePage = getActivePage(state.project);
       if (state.selection.kind === "panel") {
-        const nextPanels = state.project.panels.filter((panel) => panel.id !== state.selection?.id);
-        const nextProject: Project = {
-          ...state.project,
-          panels: nextPanels
-        };
+        if (!activePage.panels.some((panel) => panel.id === state.selection?.id)) {
+          return {
+            selection: undefined
+          };
+        }
+
+        const nextProject = updateActivePage(state.project, (page) => ({
+          ...page,
+          panels: page.panels.filter((panel) => panel.id !== state.selection?.id)
+        }));
 
         const historyState = withHistory(state, nextProject);
         if (!historyState) {
@@ -532,11 +827,16 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         };
       }
 
-      const nextBubbles = state.project.bubbles.filter((bubble) => bubble.id !== state.selection?.id);
-      const nextProject: Project = {
-        ...state.project,
-        bubbles: nextBubbles
-      };
+      if (!activePage.bubbles.some((bubble) => bubble.id === state.selection?.id)) {
+        return {
+          selection: undefined
+        };
+      }
+
+      const nextProject = updateActivePage(state.project, (page) => ({
+        ...page,
+        bubbles: page.bubbles.filter((bubble) => bubble.id !== state.selection?.id)
+      }));
 
       const historyState = withHistory(state, nextProject);
       if (!historyState) {
@@ -553,14 +853,15 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   updatePanel: (id, patch) => {
     set((state) => {
-      if (!state.project.panels.some((panel) => panel.id === id)) {
+      const activePage = getActivePage(state.project);
+      if (!activePage.panels.some((panel) => panel.id === id)) {
         return state;
       }
 
-      const nextProject: Project = {
-        ...state.project,
-        panels: replacePanel(state.project.panels, id, patch)
-      };
+      const nextProject = updateActivePage(state.project, (page) => ({
+        ...page,
+        panels: replacePanel(page.panels, id, patch)
+      }));
 
       const historyState = withHistory(state, nextProject);
       if (!historyState) {
@@ -575,13 +876,14 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   updateBubble: (id, patch) => {
     set((state) => {
-      if (!state.project.bubbles.some((bubble) => bubble.id === id)) {
+      const activePage = getActivePage(state.project);
+      if (!activePage.bubbles.some((bubble) => bubble.id === id)) {
         return state;
       }
 
-      const nextProject: Project = {
-        ...state.project,
-        bubbles: state.project.bubbles.map((bubble) => {
+      const nextProject = updateActivePage(state.project, (page) => ({
+        ...page,
+        bubbles: page.bubbles.map((bubble) => {
           if (bubble.id !== id) {
             return bubble;
           }
@@ -596,7 +898,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
             fontSize: patch.fontSize === undefined ? bubble.fontSize : Math.max(8, patch.fontSize)
           };
         })
-      };
+      }));
 
       const historyState = withHistory(state, nextProject);
       if (!historyState) {
@@ -612,10 +914,10 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   addBubble: (type) => {
     const bubble = createBubbleFactory(type);
     set((state) => {
-      const nextProject: Project = {
-        ...state.project,
-        bubbles: [...state.project.bubbles, bubble]
-      };
+      const nextProject = updateActivePage(state.project, (page) => ({
+        ...page,
+        bubbles: [...page.bubbles, bubble]
+      }));
 
       const historyState = withHistory(state, nextProject);
       if (!historyState) {
@@ -649,7 +951,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   setPanelCrop: (id, crop) => {
     set((state) => {
-      const panel = findPanel(state.project, id);
+      const activePage = getActivePage(state.project);
+      const panel = activePage.panels.find((entry) => entry.id === id);
       if (!panel?.image?.original) {
         return state;
       }
@@ -667,9 +970,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         scale: clamp(crop.scale, 0.1, 4)
       };
 
-      const nextProject: Project = {
-        ...state.project,
-        panels: state.project.panels.map((entry) => {
+      const nextProject = updateActivePage(state.project, (page) => ({
+        ...page,
+        panels: page.panels.map((entry) => {
           if (entry.id !== id || !entry.image) {
             return entry;
           }
@@ -681,7 +984,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
             }
           };
         })
-      };
+      }));
 
       const historyState = withHistory(state, nextProject);
       if (!historyState) {
@@ -696,14 +999,15 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   resetPanelCrop: (id) => {
     set((state) => {
-      const target = state.project.panels.find((panel) => panel.id === id);
+      const activePage = getActivePage(state.project);
+      const target = activePage.panels.find((panel) => panel.id === id);
       if (!target?.image?.crop) {
         return state;
       }
 
-      const nextProject: Project = {
-        ...state.project,
-        panels: state.project.panels.map((panel) => {
+      const nextProject = updateActivePage(state.project, (page) => ({
+        ...page,
+        panels: page.panels.map((panel) => {
           if (panel.id !== id || !panel.image) {
             return panel;
           }
@@ -715,7 +1019,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
             }
           };
         })
-      };
+      }));
 
       const historyState = withHistory(state, nextProject);
       if (!historyState) {
@@ -746,29 +1050,21 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     try {
       const result = await uploadLocalImage(file);
       set((state) => {
-        if (!state.project.panels.some((entry) => entry.id === id)) {
+        const nextProject = updateProjectPanelById(state.project, id, (entry) => ({
+          ...entry,
+          image: {
+            original: result.url,
+            naturalWidth: result.naturalWidth,
+            naturalHeight: result.naturalHeight,
+            crop: undefined
+          }
+        }));
+
+        if (!nextProject) {
           return {
             notice: "分镜已不存在"
           };
         }
-
-        const nextProject: Project = {
-          ...state.project,
-          panels: state.project.panels.map((entry) => {
-            if (entry.id !== id) {
-              return entry;
-            }
-            return {
-              ...entry,
-              image: {
-                original: result.url,
-                naturalWidth: result.naturalWidth,
-                naturalHeight: result.naturalHeight,
-                crop: undefined
-              }
-            };
-          })
-        };
 
         const historyState = withHistory(state, nextProject);
         if (!historyState) {
@@ -823,22 +1119,20 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       });
 
       set((state) => {
-        const nextProject: Project = {
-          ...state.project,
-          panels: state.project.panels.map((entry) => {
-            if (entry.id !== id) {
-              return entry;
-            }
-            return {
-              ...entry,
-              image: {
-                original: result.url,
-                naturalWidth: result.naturalWidth,
-                naturalHeight: result.naturalHeight
-              }
-            };
-          })
-        };
+        const nextProject = updateProjectPanelById(state.project, id, (entry) => ({
+          ...entry,
+          image: {
+            original: result.url,
+            naturalWidth: result.naturalWidth,
+            naturalHeight: result.naturalHeight
+          }
+        }));
+
+        if (!nextProject) {
+          return {
+            notice: "分镜已不存在"
+          };
+        }
 
         const historyState = withHistory(state, nextProject);
         if (!historyState) {
@@ -904,10 +1198,12 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         return;
       }
 
+      const normalized = normalizeLoadedProject(loaded as LegacyProject);
+
       set({
         project: {
-          ...loaded,
-          id: loaded.id || uuidv4()
+          ...normalized,
+          id: normalized.id || uuidv4()
         },
         historyPast: [],
         historyFuture: [],

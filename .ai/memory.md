@@ -136,3 +136,27 @@
 - 裁剪边界修复：
   - `setPanelCrop` 中 `x/y` 约束改为 `naturalSize - cropSize` 上限
   - 避免写入超出原图边界的裁剪框
+
+## 2026-04-05 - 多页面管理侧栏 + PDF 按页顺序导出
+
+- 数据模型从单页扩展为多页：
+  - `Project` 改为 `pages: ProjectPage[] + activePageId`
+  - 新增 `ProjectPage` 类型，页面内独立保存 `canvas/panels/bubbles`
+- `store` 新增页面操作：
+  - `setActivePage(id)`（仅切换 UI，不入历史）
+  - `addPage()` / `deletePage(id)` / `movePage(id, "up" | "down")`（入增量历史）
+  - 新增 `getActivePage(project)` 统一读取当前页
+- `loadProject` 兼容旧项目结构：
+  - 旧版 `canvas/panels/bubbles` 自动归一化为单页 `pages`
+  - 多页项目会校验 `activePageId`，异常时回退到第一页
+- UI 新增左侧页面预览栏 `PageSidebar`：
+  - 页面缩略图预览
+  - 点击切换页面
+  - 新增 / 删除 / 上移 / 下移
+- 导出行为更新：
+  - PNG：导出当前页
+  - PDF：按 `project.pages` 顺序逐页导出，自动切换活动页截图并在结束后恢复原活动页
+- 相关面板与工具条全部切到“当前活动页”语义（Canvas/Inspector/Toolbar/Footer）。
+- 本轮修复：
+  - `normalizeLoadedProject` 中 `activePageId` 可选类型导致的 TS 报错
+  - `npm run build` 已通过

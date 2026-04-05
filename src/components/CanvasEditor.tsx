@@ -3,7 +3,7 @@ import Konva from "konva";
 import { Ellipse, Group, Image as KonvaImage, Layer, Rect, Stage, Text, Transformer } from "react-konva";
 import useImage from "use-image";
 import { Bubble, Panel } from "../types";
-import { useEditorStore } from "../lib/store";
+import { getActivePage, useEditorStore } from "../lib/store";
 
 type DraftRect = {
   x: number;
@@ -34,6 +34,18 @@ function snapSize(value: number, minValue: number, step = 16) {
   const minMultiple = Math.ceil(minValue / step) * step;
   const snapped = Math.round(value / step) * step;
   return Math.max(minMultiple, snapped);
+}
+
+function getOrientation(width: number, height: number): "landscape" | "portrait" {
+  return width >= height ? "landscape" : "portrait";
+}
+
+function waitForStageRefresh(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
 }
 
 function PanelImageLayer({ panel }: { panel: Panel }) {
@@ -137,11 +149,13 @@ function BubbleText({ bubble }: { bubble: Bubble }) {
 
 const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props, ref) {
   const project = useEditorStore((state) => state.project);
+  const activePage = useEditorStore((state) => getActivePage(state.project));
   const selection = useEditorStore((state) => state.selection);
   const manualPanelMode = useEditorStore((state) => state.manualPanelMode);
   const snapSizeTo16 = useEditorStore((state) => state.snapSizeTo16);
 
   const setNotice = useEditorStore((state) => state.setNotice);
+  const setActivePage = useEditorStore((state) => state.setActivePage);
   const selectPanel = useEditorStore((state) => state.selectPanel);
   const selectBubble = useEditorStore((state) => state.selectBubble);
   const clearSelection = useEditorStore((state) => state.clearSelection);
@@ -188,9 +202,9 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
 
     transformerRef.current.nodes([node]);
     transformerRef.current.getLayer()?.batchDraw();
-  }, [selectedNodeId, project.panels, project.bubbles]);
+  }, [selectedNodeId, activePage.id, activePage.panels, activePage.bubbles]);
 
-  const captureStageDataUrl = () => {
+  const captureStageDataUrl = (exportWidth: number, exportHeight: number) => {
     const stage = stageRef.current;
     if (!stage) {
       throw new Error("画布未初始化");
@@ -205,8 +219,8 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
       transformerRef.current.nodes([]);
     }
 
-    stage.width(project.canvas.width);
-    stage.height(project.canvas.height);
+    stage.width(exportWidth);
+    stage.height(exportHeight);
     stage.scale({ x: 1, y: 1 });
     stage.batchDraw();
 
@@ -233,7 +247,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
     () => ({
       exportPng: async () => {
         try {
-          const dataUrl = captureStageDataUrl();
+          const dataUrl = captureStageDataUrl(activePage.canvas.width, activePage.canvas.height);
           const filename = formatFilename(project.name, "png");
           triggerDownload(dataUrl, filename);
           setNotice("PNG 导出完成");
@@ -244,29 +258,58 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
       },
 
       exportPdf: async () => {
+        if (project.pages.length === 0) {
+          setNotice("没有可导出的页面");
+          return;
+        }
+
+        const originalPageId = project.activePageId;
+
         try {
-          const dataUrl = captureStageDataUrl();
           const filename = formatFilename(project.name, "pdf");
           const { jsPDF } = await import("jspdf");
-          const orientation = project.canvas.width >= project.canvas.height ? "landscape" : "portrait";
 
-          const doc = new jsPDF({
-            orientation,
-            unit: "px",
-            format: [project.canvas.width, project.canvas.height],
-            compress: true
-          });
+          let doc: InstanceType<typeof jsPDF> | null = null;
 
-          doc.addImage(dataUrl, "PNG", 0, 0, project.canvas.width, project.canvas.height, undefined, "FAST");
-          doc.save(filename);
-          setNotice("PDF 导出完成");
+          for (let index = 0; index < project.pages.length; index += 1) {
+            const page = project.pages[index];
+
+            if (useEditorStore.getState().project.activePageId !== page.id) {
+              setActivePage(page.id);
+              await waitForStageRefresh();
+            }
+
+            const dataUrl = captureStageDataUrl(page.canvas.width, page.canvas.height);
+            const orientation = getOrientation(page.canvas.width, page.canvas.height);
+
+            if (!doc) {
+              doc = new jsPDF({
+                orientation,
+                unit: "px",
+                format: [page.canvas.width, page.canvas.height],
+                compress: true
+              });
+            } else {
+              doc.addPage([page.canvas.width, page.canvas.height], orientation);
+            }
+
+            doc.addImage(dataUrl, "PNG", 0, 0, page.canvas.width, page.canvas.height, undefined, "FAST");
+          }
+
+          doc?.save(filename);
+          setNotice("PDF 导出完成（按页面顺序）");
         } catch (error) {
           const message = error instanceof Error ? error.message : "PDF 导出失败";
           setNotice(message);
+        } finally {
+          if (useEditorStore.getState().project.activePageId !== originalPageId) {
+            setActivePage(originalPageId);
+            await waitForStageRefresh();
+          }
         }
       }
     }),
-    [project.canvas.height, project.canvas.width, project.name, setNotice]
+    [activePage.canvas.height, activePage.canvas.width, project.activePageId, project.name, project.pages, setActivePage, setNotice]
   );
 
   const toScene = (screen: { x: number; y: number }) => ({
@@ -354,14 +397,14 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
         <div
           className="relative"
           style={{
-            width: Math.ceil(project.canvas.width * zoom),
-            height: Math.ceil(project.canvas.height * zoom)
+            width: Math.ceil(activePage.canvas.width * zoom),
+            height: Math.ceil(activePage.canvas.height * zoom)
           }}
         >
           <Stage
             ref={stageRef}
-            width={Math.ceil(project.canvas.width * zoom)}
-            height={Math.ceil(project.canvas.height * zoom)}
+            width={Math.ceil(activePage.canvas.width * zoom)}
+            height={Math.ceil(activePage.canvas.height * zoom)}
             scaleX={zoom}
             scaleY={zoom}
             onMouseDown={handleMouseDown}
@@ -370,16 +413,9 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
             className="bg-slate-200"
           >
             <Layer>
-              <Rect
-                name="canvas-bg"
-                x={0}
-                y={0}
-                width={project.canvas.width}
-                height={project.canvas.height}
-                fill="#f8fafc"
-              />
+              <Rect name="canvas-bg" x={0} y={0} width={activePage.canvas.width} height={activePage.canvas.height} fill="#f8fafc" />
 
-              {project.panels.map((panel) => {
+              {activePage.panels.map((panel) => {
                 const selected = selection?.kind === "panel" && selection.id === panel.id;
                 return (
                   <Group
@@ -439,7 +475,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
                 );
               })}
 
-              {project.bubbles.map((bubble) => {
+              {activePage.bubbles.map((bubble) => {
                 const selected = selection?.kind === "bubble" && selection.id === bubble.id;
                 return (
                   <Group
@@ -488,15 +524,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
                   >
                     <BubbleShape bubble={bubble} />
                     <BubbleText bubble={bubble} />
-                    {selected && (
-                      <Rect
-                        width={bubble.width}
-                        height={bubble.height}
-                        stroke="#2563eb"
-                        strokeWidth={2}
-                        dash={[8, 5]}
-                      />
-                    )}
+                    {selected && <Rect width={bubble.width} height={bubble.height} stroke="#2563eb" strokeWidth={2} dash={[8, 5]} />}
                   </Group>
                 );
               })}

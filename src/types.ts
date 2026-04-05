@@ -57,12 +57,19 @@ export type Bubble = {
   borderColor: string;
 };
 
-export type Project = {
+export type ProjectPage = {
   id: string;
   name: string;
   canvas: CanvasConfig;
   panels: Panel[];
   bubbles: Bubble[];
+};
+
+export type Project = {
+  id: string;
+  name: string;
+  pages: ProjectPage[];
+  activePageId: string;
 };
 
 export type Selection =
