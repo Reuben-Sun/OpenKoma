@@ -28,6 +28,10 @@ export type NoticeEntry = {
 
 type EditorStore = {
   project: Project;
+  projectDirectoryHandle?: FileSystemDirectoryHandle;
+  projectDirectoryName?: string;
+  assetRefMap: Record<string, string>;
+  transientObjectUrls: string[];
   selection?: Selection;
   manualPanelMode: boolean;
   snapSizeTo16: boolean;
@@ -122,7 +126,7 @@ type NormalizedLoadedState = {
 
 type PersistedProjectDocumentV2 = {
   format: "openkoma-project";
-  version: 2;
+  version: number;
   savedAt: string;
   layout: Project;
   history: {
@@ -135,10 +139,311 @@ type PersistedProjectDocumentV2 = {
 const HISTORY_LIMIT = 80;
 const NOTICE_HISTORY_LIMIT = 300;
 const PROJECT_FILE_FORMAT = "openkoma-project";
-const PROJECT_FILE_VERSION = 2;
+const PROJECT_FILE_VERSION = 3;
+const PROJECT_JSON_FILENAME = "project.json";
+
+type ProjectDirectoryPickerWindow = Window & {
+  showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle>;
+};
 
 function cloneProject(project: Project): Project {
   return structuredClone(project);
+}
+
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function hasDirectoryPicker(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const picker = (window as ProjectDirectoryPickerWindow).showDirectoryPicker;
+  return typeof picker === "function";
+}
+
+async function pickProjectDirectory(): Promise<FileSystemDirectoryHandle | null> {
+  if (!hasDirectoryPicker()) {
+    return null;
+  }
+
+  const picker = (window as ProjectDirectoryPickerWindow).showDirectoryPicker;
+  if (!picker) {
+    return null;
+  }
+
+  try {
+    return await picker.call(window);
+  } catch (error) {
+    if (isAbortError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function readJsonFromDirectory(directory: FileSystemDirectoryHandle): Promise<unknown> {
+  const fileHandle = await directory.getFileHandle(PROJECT_JSON_FILENAME, { create: false });
+  const file = await fileHandle.getFile();
+  const text = await file.text();
+  return JSON.parse(text) as unknown;
+}
+
+async function writeJsonToDirectory(directory: FileSystemDirectoryHandle, payload: unknown): Promise<void> {
+  const fileHandle = await directory.getFileHandle(PROJECT_JSON_FILENAME, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(JSON.stringify(payload, null, 2));
+  await writable.close();
+}
+
+function sanitizePathSegments(relativePath: string): string[] | null {
+  const cleaned = relativePath.replace(/\\/g, "/").trim();
+  if (!cleaned) {
+    return null;
+  }
+  const segments = cleaned.split("/").filter((segment) => segment.length > 0 && segment !== ".");
+  if (segments.length === 0 || segments.some((segment) => segment === "..")) {
+    return null;
+  }
+  return segments;
+}
+
+async function getDirectoryBySegments(
+  root: FileSystemDirectoryHandle,
+  segments: string[],
+  create: boolean
+): Promise<FileSystemDirectoryHandle> {
+  let current = root;
+  for (const segment of segments) {
+    current = await current.getDirectoryHandle(segment, { create });
+  }
+  return current;
+}
+
+async function readBlobFromDirectoryByPath(
+  root: FileSystemDirectoryHandle,
+  relativePath: string
+): Promise<Blob | null> {
+  const segments = sanitizePathSegments(relativePath);
+  if (!segments || segments.length === 0) {
+    return null;
+  }
+
+  const fileName = segments[segments.length - 1];
+  const directories = segments.slice(0, -1);
+
+  try {
+    const folder = directories.length > 0 ? await getDirectoryBySegments(root, directories, false) : root;
+    const fileHandle = await folder.getFileHandle(fileName, { create: false });
+    const file = await fileHandle.getFile();
+    return file;
+  } catch {
+    return null;
+  }
+}
+
+async function writeBlobToDirectoryByPath(
+  root: FileSystemDirectoryHandle,
+  relativePath: string,
+  blob: Blob
+): Promise<void> {
+  const segments = sanitizePathSegments(relativePath);
+  if (!segments || segments.length === 0) {
+    throw new Error("图片路径无效");
+  }
+
+  const fileName = segments[segments.length - 1];
+  const directories = segments.slice(0, -1);
+  const folder = directories.length > 0 ? await getDirectoryBySegments(root, directories, true) : root;
+  const fileHandle = await folder.getFileHandle(fileName, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(blob);
+  await writable.close();
+}
+
+function normalizeProjectAssetRef(ref: string | undefined): string | null {
+  const raw = ref?.trim();
+  if (!raw) {
+    return null;
+  }
+
+  const withoutLeading = raw.replace(/^\.?\//, "");
+  if (!withoutLeading.startsWith("images/") && !withoutLeading.startsWith("assets/")) {
+    return null;
+  }
+  const segments = sanitizePathSegments(withoutLeading);
+  if (!segments) {
+    return null;
+  }
+  return segments.join("/");
+}
+
+function sanitizeFilenameSegment(value: string): string {
+  const compact = safeDecodeURIComponent(value).replace(/[^\w.-]+/g, "_");
+  return compact.replace(/^_+|_+$/g, "");
+}
+
+function splitFilename(value: string): { stem: string; ext: string } {
+  const idx = value.lastIndexOf(".");
+  if (idx <= 0 || idx === value.length - 1) {
+    return { stem: value, ext: "" };
+  }
+  return {
+    stem: value.slice(0, idx),
+    ext: value.slice(idx).toLowerCase()
+  };
+}
+
+function extensionFromMimeType(mimeType: string): string {
+  const map: Record<string, string> = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "image/svg+xml": ".svg"
+  };
+  return map[mimeType.toLowerCase()] ?? ".png";
+}
+
+function inferFilenameFromRef(ref: string, blobType: string): string {
+  let candidate = "";
+  try {
+    const url = new URL(ref, "http://localhost");
+    const segment = url.pathname.split("/").filter(Boolean).pop() ?? "";
+    candidate = segment;
+  } catch {
+    candidate = "";
+  }
+
+  const sanitized = sanitizeFilenameSegment(candidate || "image");
+  const split = splitFilename(sanitized);
+  const safeStem = split.stem || "image";
+  const safeExt = split.ext || extensionFromMimeType(blobType);
+  return `${safeStem}${safeExt}`;
+}
+
+function ensureUniqueAssetRef(
+  preferred: string | undefined,
+  ref: string,
+  blobType: string,
+  used: Set<string>
+): string {
+  const normalizedPreferred = normalizeProjectAssetRef(preferred);
+  if (normalizedPreferred && !used.has(normalizedPreferred)) {
+    used.add(normalizedPreferred);
+    return normalizedPreferred;
+  }
+
+  const rawName = inferFilenameFromRef(ref, blobType);
+  const split = splitFilename(rawName);
+  const stem = split.stem || "image";
+  const ext = split.ext || ".png";
+
+  let index = 0;
+  while (true) {
+    const suffix = index === 0 ? "" : `_${index}`;
+    const next = `images/${stem}${suffix}${ext}`;
+    if (!used.has(next)) {
+      used.add(next);
+      return next;
+    }
+    index += 1;
+  }
+}
+
+function collectImageOriginalRefs(value: unknown, output: Set<string>, key?: string): void {
+  if (typeof value === "string") {
+    if (key === "original") {
+      const normalized = value.trim();
+      if (normalized) {
+        output.add(normalized);
+      }
+    }
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      collectImageOriginalRefs(entry, output);
+    }
+    return;
+  }
+
+  if (!isRecord(value)) {
+    return;
+  }
+
+  for (const [entryKey, entryValue] of Object.entries(value)) {
+    collectImageOriginalRefs(entryValue, output, entryKey);
+  }
+}
+
+function mapImageOriginalRefs<T>(value: T, replacement: Map<string, string>, key?: string): T {
+  if (typeof value === "string") {
+    if (key === "original" && replacement.has(value)) {
+      return replacement.get(value) as T;
+    }
+    return value as T;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => mapImageOriginalRefs(entry, replacement)) as T;
+  }
+
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const next: Record<string, unknown> = {};
+  for (const [entryKey, entryValue] of Object.entries(value)) {
+    next[entryKey] = mapImageOriginalRefs(entryValue, replacement, entryKey);
+  }
+  return next as T;
+}
+
+async function resolveImageBlobForSave(
+  ref: string,
+  sourceDirectory: FileSystemDirectoryHandle | undefined
+): Promise<Blob | null> {
+  const normalizedAssetRef = normalizeProjectAssetRef(ref);
+  if (normalizedAssetRef && sourceDirectory) {
+    const localBlob = await readBlobFromDirectoryByPath(sourceDirectory, normalizedAssetRef);
+    if (localBlob) {
+      return localBlob;
+    }
+  }
+
+  try {
+    const response = await fetch(ref);
+    if (!response.ok) {
+      return null;
+    }
+    return await response.blob();
+  } catch {
+    return null;
+  }
+}
+
+function revokeObjectUrls(urls: string[]): void {
+  for (const url of urls) {
+    if (!url.startsWith("blob:")) {
+      continue;
+    }
+    try {
+      URL.revokeObjectURL(url);
+    } catch {
+      // ignored
+    }
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -354,6 +659,103 @@ function createPersistedProjectDocument(state: Pick<EditorStore, "project" | "hi
       future: structuredClone(state.historyFuture)
     },
     memories: structuredClone(state.noticeHistory)
+  };
+}
+
+type MaterializedSaveResult = {
+  document: PersistedProjectDocumentV2;
+  runtimeAssetRefMap: Record<string, string>;
+  unresolvedRefs: string[];
+};
+
+async function materializeProjectAssetsForSave(
+  baseDocument: PersistedProjectDocumentV2,
+  destinationDirectory: FileSystemDirectoryHandle,
+  sourceDirectory: FileSystemDirectoryHandle | undefined,
+  existingMap: Record<string, string>
+): Promise<MaterializedSaveResult> {
+  const refs = new Set<string>();
+  collectImageOriginalRefs(baseDocument.layout, refs);
+  collectImageOriginalRefs(baseDocument.history, refs);
+
+  const usedAssetRefs = new Set<string>();
+  const replacement = new Map<string, string>();
+  const runtimeAssetRefMap: Record<string, string> = {};
+  const unresolvedRefs: string[] = [];
+
+  for (const ref of refs) {
+    const blob = await resolveImageBlobForSave(ref, sourceDirectory);
+    if (!blob) {
+      unresolvedRefs.push(ref);
+      continue;
+    }
+
+    const preferred = existingMap[ref] ?? normalizeProjectAssetRef(ref) ?? undefined;
+    const assetRef = ensureUniqueAssetRef(preferred, ref, blob.type, usedAssetRefs);
+    await writeBlobToDirectoryByPath(destinationDirectory, assetRef, blob);
+    replacement.set(ref, assetRef);
+    runtimeAssetRefMap[ref] = assetRef;
+  }
+
+  return {
+    document: {
+      ...baseDocument,
+      layout: mapImageOriginalRefs(baseDocument.layout, replacement),
+      history: mapImageOriginalRefs(baseDocument.history, replacement)
+    },
+    runtimeAssetRefMap,
+    unresolvedRefs
+  };
+}
+
+type MaterializedLoadResult = {
+  project: Project;
+  historyPast: HistoryEntry[];
+  historyFuture: HistoryEntry[];
+  runtimeAssetRefMap: Record<string, string>;
+  objectUrls: string[];
+  missingAssetRefs: string[];
+};
+
+async function materializeProjectAssetsForLoad(
+  loaded: Pick<NormalizedLoadedState, "project" | "historyPast" | "historyFuture">,
+  directory: FileSystemDirectoryHandle
+): Promise<MaterializedLoadResult> {
+  const refs = new Set<string>();
+  collectImageOriginalRefs(loaded.project, refs);
+  collectImageOriginalRefs(loaded.historyPast, refs);
+  collectImageOriginalRefs(loaded.historyFuture, refs);
+
+  const replacement = new Map<string, string>();
+  const runtimeAssetRefMap: Record<string, string> = {};
+  const objectUrls: string[] = [];
+  const missingAssetRefs: string[] = [];
+
+  for (const ref of refs) {
+    const normalizedRef = normalizeProjectAssetRef(ref);
+    if (!normalizedRef) {
+      continue;
+    }
+
+    const blob = await readBlobFromDirectoryByPath(directory, normalizedRef);
+    if (!blob) {
+      missingAssetRefs.push(normalizedRef);
+      continue;
+    }
+
+    const objectUrl = URL.createObjectURL(blob);
+    replacement.set(ref, objectUrl);
+    runtimeAssetRefMap[objectUrl] = normalizedRef;
+    objectUrls.push(objectUrl);
+  }
+
+  return {
+    project: mapImageOriginalRefs(loaded.project, replacement),
+    historyPast: mapImageOriginalRefs(loaded.historyPast, replacement),
+    historyFuture: mapImageOriginalRefs(loaded.historyFuture, replacement),
+    runtimeAssetRefMap,
+    objectUrls,
+    missingAssetRefs
   };
 }
 
@@ -676,6 +1078,10 @@ function createNewPageName(project: Project): string {
 
 export const useEditorStore = create<EditorStore>((set, get) => ({
   project: createEmptyProject(),
+  projectDirectoryHandle: undefined,
+  projectDirectoryName: undefined,
+  assetRefMap: {},
+  transientObjectUrls: [],
   selection: undefined,
   manualPanelMode: false,
   snapSizeTo16: false,
@@ -1479,9 +1885,47 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     }));
 
     try {
+      if (!hasDirectoryPicker()) {
+        const state = get();
+        await saveProjectApi(createPersistedProjectDocument(state));
+        get().setNotice("当前环境不支持路径选择，已回退保存到 ./project/project.json");
+        return;
+      }
+
+      let targetDirectory = get().projectDirectoryHandle;
+      if (!targetDirectory) {
+        const pickedDirectory = await pickProjectDirectory();
+        if (!pickedDirectory) {
+          get().setNotice("已取消保存");
+          return;
+        }
+        targetDirectory = pickedDirectory;
+      }
+
       const state = get();
-      await saveProjectApi(createPersistedProjectDocument(state));
-      get().setNotice("项目已保存到 ./project/project.json");
+      const baseDocument = createPersistedProjectDocument(state);
+      const materialized = await materializeProjectAssetsForSave(
+        baseDocument,
+        targetDirectory,
+        state.projectDirectoryHandle ?? targetDirectory,
+        state.assetRefMap
+      );
+
+      await writeJsonToDirectory(targetDirectory, materialized.document);
+
+      set({
+        projectDirectoryHandle: targetDirectory,
+        projectDirectoryName: targetDirectory.name,
+        assetRefMap: materialized.runtimeAssetRefMap
+      });
+
+      if (materialized.unresolvedRefs.length > 0) {
+        get().setNotice(
+          `项目已保存到 ${targetDirectory.name}/${PROJECT_JSON_FILENAME}，但有 ${materialized.unresolvedRefs.length} 张图片未能写入`
+        );
+      } else {
+        get().setNotice(`项目已保存到 ${targetDirectory.name}/${PROJECT_JSON_FILENAME}`);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "保存失败";
       get().setNotice(message);
@@ -1505,38 +1949,95 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     }));
 
     try {
-      const loaded = await loadProjectApi();
-      if (!loaded) {
-        get().setNotice("未找到已保存项目");
+      if (!hasDirectoryPicker()) {
+        const loaded = await loadProjectApi();
+        if (!loaded) {
+          get().setNotice("未找到已保存项目");
+          return;
+        }
+
+        const normalized = normalizeLoadedState(loaded);
+        if (!normalized) {
+          get().setNotice("项目数据格式无效");
+          return;
+        }
+
+        revokeObjectUrls(get().transientObjectUrls);
+
+        const loadNotice =
+          normalized.source === "v2"
+            ? `项目加载完成：已恢复 ${normalized.historyPast.length} 条撤销记录、${normalized.historyFuture.length} 条重做记录、${normalized.noticeHistory.length} 条消息`
+            : "项目加载完成：旧版项目不包含可恢复的编辑记忆";
+
+        const nextNoticeHistory = appendNoticeToHistory(normalized.noticeHistory, loadNotice);
+
+        set({
+          project: {
+            ...normalized.project,
+            id: normalized.project.id || uuidv4()
+          },
+          historyPast: normalized.historyPast,
+          historyFuture: normalized.historyFuture,
+          noticeHistory: nextNoticeHistory,
+          selection: undefined,
+          notice: loadNotice,
+          projectDirectoryHandle: undefined,
+          projectDirectoryName: undefined,
+          assetRefMap: {},
+          transientObjectUrls: []
+        });
         return;
       }
 
+      const selectedDirectory = await pickProjectDirectory();
+      if (!selectedDirectory) {
+        get().setNotice("已取消加载");
+        return;
+      }
+
+      const loaded = await readJsonFromDirectory(selectedDirectory);
       const normalized = normalizeLoadedState(loaded);
       if (!normalized) {
         get().setNotice("项目数据格式无效");
         return;
       }
 
-      const loadNotice =
+      const materialized = await materializeProjectAssetsForLoad(normalized, selectedDirectory);
+      revokeObjectUrls(get().transientObjectUrls);
+
+      const baseNotice =
         normalized.source === "v2"
           ? `项目加载完成：已恢复 ${normalized.historyPast.length} 条撤销记录、${normalized.historyFuture.length} 条重做记录、${normalized.noticeHistory.length} 条消息`
           : "项目加载完成：旧版项目不包含可恢复的编辑记忆";
+      const loadNotice =
+        materialized.missingAssetRefs.length > 0
+          ? `${baseNotice}，有 ${materialized.missingAssetRefs.length} 张图片缺失`
+          : baseNotice;
 
       const nextNoticeHistory = appendNoticeToHistory(normalized.noticeHistory, loadNotice);
 
       set({
         project: {
-          ...normalized.project,
-          id: normalized.project.id || uuidv4()
+          ...materialized.project,
+          id: materialized.project.id || uuidv4()
         },
-        historyPast: normalized.historyPast,
-        historyFuture: normalized.historyFuture,
+        historyPast: materialized.historyPast,
+        historyFuture: materialized.historyFuture,
         noticeHistory: nextNoticeHistory,
         selection: undefined,
-        notice: loadNotice
+        notice: loadNotice,
+        projectDirectoryHandle: selectedDirectory,
+        projectDirectoryName: selectedDirectory.name,
+        assetRefMap: materialized.runtimeAssetRefMap,
+        transientObjectUrls: materialized.objectUrls
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "加载失败";
+      const message =
+        error instanceof DOMException && error.name === "NotFoundError"
+          ? `所选目录中未找到 ${PROJECT_JSON_FILENAME}`
+          : error instanceof Error
+            ? error.message
+            : "加载失败";
       get().setNotice(message);
     } finally {
       set((state) => ({

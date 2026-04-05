@@ -370,3 +370,36 @@
     - `saveProject/loadProject` 参数改为 `unknown`，由 store 负责版本解析
 - 验证：
   - `npm run build` 通过
+
+## 2026-04-05 - 项目保存/加载改为路径选择（增量）
+
+- 目标：
+  - 点击“保存项目”时，若当前还没有绑定项目路径，则先弹出路径选择
+  - 点击“加载项目”时，总是弹出路径选择
+  - 如果当前已在一个已加载/已保存项目中，再次保存直接更新该项目文件，不再重复弹窗
+- 实现：
+  - `src/lib/store.ts`
+    - 新增目录句柄状态：
+      - `projectDirectoryHandle`
+      - `projectDirectoryName`
+    - 新增项目资产映射与临时 URL 管理：
+      - `assetRefMap`
+      - `transientObjectUrls`
+    - 新增目录读写流程（基于 `showDirectoryPicker`）：
+      - 保存到 `<选中目录>/project.json`
+      - 加载时从 `<选中目录>/project.json` 读取
+    - `saveProject` 行为调整：
+      - 有目录句柄：直接保存
+      - 无目录句柄：先弹目录选择，再保存
+    - `loadProject` 行为调整：
+      - 每次加载都先弹目录选择，再读取项目
+    - 保留不支持目录选择环境的后备逻辑：
+      - 回退到原后端 `/api/project/save` 与 `/api/project/load`
+    - 新增图片资产物化逻辑：
+      - 保存时将 `image.original` 统一写为项目目录内相对路径（如 `images/...`）
+      - 加载时把相对路径恢复为可显示的 `blob:` URL，并维护映射
+      - 切换加载项目时回收旧的临时 `blob:` URL，避免泄漏
+- 存档版本：
+  - `PROJECT_FILE_VERSION` 升级到 `3`
+- 验证：
+  - `npm run build` 通过
