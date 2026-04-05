@@ -1,9 +1,92 @@
 import { useMemo } from "react";
-import { ProjectPage } from "../types";
+import { Ellipse, Group, Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva";
+import useImage from "use-image";
+import { Bubble, Panel, ProjectPage } from "../types";
 import { useEditorStore } from "../lib/store";
 
 const buttonClass =
   "rounded-lg border border-slate-500 bg-slate-800 px-2 py-1 text-xs text-slate-100 transition hover:border-blue-400 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40";
+
+function toVerticalText(text: string) {
+  return text
+    .split("\n")
+    .map((line) => line.split("").join("\n"))
+    .join("\n\n");
+}
+
+function PreviewPanelImage({ panel }: { panel: Panel }) {
+  const imageUrl = panel.image?.original ?? "";
+  const [image] = useImage(imageUrl, "anonymous");
+
+  if (!image || !panel.image) {
+    return null;
+  }
+
+  const innerWidth = Math.max(1, panel.width - panel.gap * 2);
+  const innerHeight = Math.max(1, panel.height - panel.gap * 2);
+
+  const crop = panel.image.crop;
+  const sourceWidth = crop?.width ?? panel.image.naturalWidth ?? image.width;
+  const sourceHeight = crop?.height ?? panel.image.naturalHeight ?? image.height;
+  const coverScale = Math.max(innerWidth / Math.max(1, sourceWidth), innerHeight / Math.max(1, sourceHeight));
+  const drawScale = coverScale * (crop?.scale ?? 1);
+  const drawWidth = sourceWidth * drawScale;
+  const drawHeight = sourceHeight * drawScale;
+  const offsetX = panel.gap + (innerWidth - drawWidth) / 2;
+  const offsetY = panel.gap + (innerHeight - drawHeight) / 2;
+
+  return (
+    <Group clipX={panel.gap} clipY={panel.gap} clipWidth={innerWidth} clipHeight={innerHeight} listening={false}>
+      <KonvaImage
+        image={image}
+        x={offsetX}
+        y={offsetY}
+        width={drawWidth}
+        height={drawHeight}
+        crop={
+          crop
+            ? {
+                x: crop.x,
+                y: crop.y,
+                width: crop.width,
+                height: crop.height
+              }
+            : undefined
+        }
+        listening={false}
+      />
+    </Group>
+  );
+}
+
+function PreviewBubbleShape({ bubble }: { bubble: Bubble }) {
+  if (bubble.type === "circle") {
+    return (
+      <Ellipse
+        x={bubble.width / 2}
+        y={bubble.height / 2}
+        radiusX={bubble.width / 2}
+        radiusY={bubble.height / 2}
+        fill={bubble.background}
+        stroke={bubble.borderColor}
+        strokeWidth={3}
+        listening={false}
+      />
+    );
+  }
+
+  return (
+    <Rect
+      width={bubble.width}
+      height={bubble.height}
+      fill={bubble.background}
+      stroke={bubble.borderColor}
+      strokeWidth={3}
+      cornerRadius={bubble.type === "rounded" ? 30 : 8}
+      listening={false}
+    />
+  );
+}
 
 function PageMiniPreview({ page }: { page: ProjectPage }) {
   const preview = useMemo(() => {
@@ -18,54 +101,56 @@ function PageMiniPreview({ page }: { page: ProjectPage }) {
   }, [page.canvas.height, page.canvas.width]);
 
   return (
-    <div className="relative rounded-md border border-slate-400 bg-slate-100 shadow-inner" style={{ width: preview.width, height: preview.height }}>
-      {page.panels.map((panel) => {
-        const left = Math.max(0, panel.x * preview.scale);
-        const top = Math.max(0, panel.y * preview.scale);
-        const width = Math.max(2, panel.width * preview.scale);
-        const height = Math.max(2, panel.height * preview.scale);
-        const borderWidth = Math.max(1, panel.borderWidth * preview.scale);
-        return (
-          <div
-            key={panel.id}
-            className="absolute bg-white/80"
-            style={{
-              left,
-              top,
-              width,
-              height,
-              borderColor: panel.borderColor,
-              borderWidth,
-              borderStyle: "solid",
-              borderRadius: Math.max(0, panel.borderRadius * preview.scale)
-            }}
-          />
-        );
-      })}
+    <div
+      className="overflow-hidden rounded-md border border-slate-400 bg-slate-100 shadow-inner"
+      style={{ width: preview.width, height: preview.height }}
+    >
+      <Stage
+        width={preview.width}
+        height={preview.height}
+        scaleX={preview.scale}
+        scaleY={preview.scale}
+        className="pointer-events-none"
+      >
+        <Layer listening={false}>
+          <Rect x={0} y={0} width={page.canvas.width} height={page.canvas.height} fill="#f8fafc" listening={false} />
 
-      {page.bubbles.map((bubble) => {
-        const left = Math.max(0, bubble.x * preview.scale);
-        const top = Math.max(0, bubble.y * preview.scale);
-        const width = Math.max(2, bubble.width * preview.scale);
-        const height = Math.max(2, bubble.height * preview.scale);
-        const borderRadius = bubble.type === "circle" ? 999 : bubble.type === "rounded" ? 8 : 2;
-        return (
-          <div
-            key={bubble.id}
-            className="absolute bg-blue-100/55"
-            style={{
-              left,
-              top,
-              width,
-              height,
-              borderColor: "#2563eb",
-              borderWidth: 1,
-              borderStyle: "dashed",
-              borderRadius
-            }}
-          />
-        );
-      })}
+          {page.panels.map((panel) => (
+            <Group key={panel.id} x={panel.x} y={panel.y} width={panel.width} height={panel.height} listening={false}>
+              <Rect
+                width={panel.width}
+                height={panel.height}
+                fill="#ffffff"
+                cornerRadius={panel.borderRadius}
+                stroke={panel.borderColor}
+                strokeWidth={panel.borderWidth}
+                listening={false}
+              />
+              <PreviewPanelImage panel={panel} />
+            </Group>
+          ))}
+
+          {page.bubbles.map((bubble) => (
+            <Group key={bubble.id} x={bubble.x} y={bubble.y} width={bubble.width} height={bubble.height} listening={false}>
+              <PreviewBubbleShape bubble={bubble} />
+              <Text
+                x={10}
+                y={10}
+                width={Math.max(10, bubble.width - 20)}
+                height={Math.max(10, bubble.height - 20)}
+                text={bubble.direction === "vertical" ? toVerticalText(bubble.text) : bubble.text}
+                align="center"
+                verticalAlign="middle"
+                fontSize={bubble.fontSize}
+                fontFamily={bubble.fontFamily}
+                fill="#0f172a"
+                lineHeight={1.2}
+                listening={false}
+              />
+            </Group>
+          ))}
+        </Layer>
+      </Stage>
     </div>
   );
 }
