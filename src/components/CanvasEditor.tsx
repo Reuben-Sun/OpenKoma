@@ -94,19 +94,18 @@ const SKEW_GUIDE_COLOR = "rgba(37, 99, 235, 0.35)";
 const TRANSFORMER_ANCHOR_SIZE = 18;
 
 function PanelFillShape({ panel }: { panel: Panel }) {
-  if (shouldPreserveImageTransparency(panel.image)) {
-    return null;
-  }
+  const fill = shouldPreserveImageTransparency(panel.image) ? "rgba(255, 255, 255, 0)" : "#ffffff";
 
   return (
     <Shape
+      // Even transparent panels need a fill so Konva can build a hit area for selection and dragging.
       sceneFunc={(context, shape) => {
         context.beginPath();
         drawPanelPath(context, panel);
         context.closePath();
         context.fillStrokeShape(shape);
       }}
-      fill="#ffffff"
+      fill={fill}
     />
   );
 }
