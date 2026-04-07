@@ -1,5 +1,4 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Switch } from "@radix-ui/themes";
 import { getActivePage, useEditorStore } from "../lib/store";
 
 const inputClass = "studio-input h-9 px-3 text-sm";
@@ -164,13 +163,17 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
             <span className={`text-[11px] ${themeMode === "light" ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
               亮
             </span>
-            <Switch
-              size="2"
-              color="cyan"
-              checked={themeMode === "dark"}
-              onCheckedChange={(checked) => setThemeMode(checked ? "dark" : "light")}
+            <button
+              type="button"
+              className={`studio-switch ${themeMode === "dark" ? "is-dark" : ""}`}
+              role="switch"
               aria-label="切换黑暗模式"
-            />
+              aria-checked={themeMode === "dark"}
+              onClick={() => setThemeMode(themeMode === "dark" ? "light" : "dark")}
+              title={themeMode === "dark" ? "切换为亮色模式" : "切换为暗色模式"}
+            >
+              <span className="studio-switch-thumb" />
+            </button>
             <span className={`text-[11px] ${themeMode === "dark" ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
               暗
             </span>
