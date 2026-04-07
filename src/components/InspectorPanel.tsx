@@ -24,6 +24,9 @@ const buttonClass = "studio-btn px-3 py-1.5 text-sm";
 const primaryButtonClass = `${buttonClass} studio-btn-primary`;
 const dangerButtonClass = `${buttonClass} studio-btn-danger`;
 const colorInputClass = "h-9 w-20 cursor-pointer rounded-lg border border-[var(--line-soft)] bg-transparent";
+const cropOverlaySvgClass = "absolute inset-0 block h-full w-full overflow-visible";
+const cropHandleClass =
+  "absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-100 bg-cyan-400 shadow-[0_0_0_1px_rgba(34,211,238,0.35)]";
 
 type CropDraft = {
   x: number;
@@ -52,6 +55,33 @@ type CropDragState =
       edge: ResizeEdge;
       startCrop: CropDraft;
     };
+
+type CropShapePreview = {
+  clipBounds: ReturnType<typeof getPanelImageClipBounds>;
+  normalizedPoints: Point[];
+  svgPoints: string;
+};
+
+type CropEdge = {
+  edge: ResizeEdge;
+  start: Point;
+  end: Point;
+  mid: Point;
+};
+
+type CropOverlayStyle = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
+const CROP_EDGE_CONNECTIONS: { edge: ResizeEdge; startIndex: number; endIndex: number }[] = [
+  { edge: "top", startIndex: 0, endIndex: 1 },
+  { edge: "right", startIndex: 1, endIndex: 2 },
+  { edge: "bottom", startIndex: 2, endIndex: 3 },
+  { edge: "left", startIndex: 3, endIndex: 0 }
+];
 
 function clamp(value: number, min: number, max: number): number {
   if (Number.isNaN(value)) {
@@ -342,7 +372,60 @@ function createScaledStyle(draft: CropDraft, scale: number) {
   };
 }
 
-function getCropShapePreview(panel: Pick<Panel, "width" | "height" | "shape" | "gap">) {
+function getEdgeMidpoint(start: Point, end: Point): Point {
+  return {
+    x: (start.x + end.x) / 2,
+    y: (start.y + end.y) / 2
+  };
+}
+
+function buildCropEdges(normalizedPoints: Point[]): CropEdge[] {
+  return CROP_EDGE_CONNECTIONS.map(({ edge, startIndex, endIndex }) => {
+    const start = normalizedPoints[startIndex];
+    const end = normalizedPoints[endIndex];
+
+    return {
+      edge,
+      start,
+      end,
+      mid: getEdgeMidpoint(start, end)
+    };
+  });
+}
+
+function createStoredCropDraft(crop: CropConfig | undefined, naturalWidth: number, naturalHeight: number): CropDraft {
+  if (crop) {
+    return {
+      x: crop.x,
+      y: crop.y,
+      width: crop.width,
+      height: crop.height
+    };
+  }
+
+  return {
+    x: 0,
+    y: 0,
+    width: naturalWidth,
+    height: naturalHeight
+  };
+}
+
+function getCropDisplaySize(naturalWidth: number, naturalHeight: number) {
+  const scale = Math.min(1, 920 / naturalWidth, 560 / naturalHeight);
+
+  return {
+    scale,
+    displayWidth: Math.max(1, Math.round(naturalWidth * scale)),
+    displayHeight: Math.max(1, Math.round(naturalHeight * scale))
+  };
+}
+
+function formatCropDraft(label: string, crop: CropDraft): string {
+  return `${label}: X ${Math.round(crop.x)} Y ${Math.round(crop.y)} W ${Math.round(crop.width)} H ${Math.round(crop.height)}`;
+}
+
+function getCropShapePreview(panel: Pick<Panel, "width" | "height" | "shape" | "gap">): CropShapePreview {
   const clipPoints = getPanelImageClipPoints(panel);
   const clipBounds = getPanelImageClipBounds(panel);
   const normalizedPoints = clipPoints.map((point) => ({
@@ -355,6 +438,83 @@ function getCropShapePreview(panel: Pick<Panel, "width" | "height" | "shape" | "
     normalizedPoints,
     svgPoints: normalizedPoints.map((point) => `${point.x * 100},${point.y * 100}`).join(" ")
   };
+}
+
+function CropPreviewFrame({ style, svgPoints }: { style: CropOverlayStyle; svgPoints: string }) {
+  return (
+    <div className="pointer-events-none absolute" style={style}>
+      <svg className={cropOverlaySvgClass} viewBox="0 0 100 100" preserveAspectRatio="none">
+        <polygon
+          points={svgPoints}
+          fill="rgba(34, 211, 238, 0.08)"
+          stroke="rgb(165 243 252)"
+          strokeWidth="1.5"
+          strokeDasharray="5 4"
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+    </div>
+  );
+}
+
+function EditableCropFrame({
+  style,
+  svgPoints,
+  cropEdges,
+  onMoveStart,
+  onResizeStart
+}: {
+  style: CropOverlayStyle;
+  svgPoints: string;
+  cropEdges: CropEdge[];
+  onMoveStart: (event: PointerEvent<Element>) => void;
+  onResizeStart: (edge: ResizeEdge) => (event: PointerEvent<Element>) => void;
+}) {
+  return (
+    <div className="absolute" style={style}>
+      <svg className={cropOverlaySvgClass} viewBox="0 0 100 100" preserveAspectRatio="none">
+        <polygon
+          points={svgPoints}
+          fill="rgba(34, 211, 238, 0.10)"
+          className="cursor-move"
+          onPointerDown={onMoveStart}
+        />
+        <polygon
+          points={svgPoints}
+          fill="none"
+          stroke="rgb(103 232 249)"
+          strokeWidth="1.8"
+          vectorEffect="non-scaling-stroke"
+        />
+        {cropEdges.map(({ edge, start, end }) => (
+          <line
+            key={edge}
+            x1={start.x * 100}
+            y1={start.y * 100}
+            x2={end.x * 100}
+            y2={end.y * 100}
+            stroke="transparent"
+            strokeWidth="14"
+            vectorEffect="non-scaling-stroke"
+            style={{ cursor: getHandleCursor(edge) }}
+            onPointerDown={onResizeStart(edge)}
+          />
+        ))}
+      </svg>
+      {cropEdges.map(({ edge, mid }) => (
+        <div
+          key={`${edge}-handle`}
+          className={cropHandleClass}
+          style={{
+            left: `${mid.x * 100}%`,
+            top: `${mid.y * 100}%`,
+            cursor: getHandleCursor(edge)
+          }}
+          onPointerDown={onResizeStart(edge)}
+        />
+      ))}
+    </div>
+  );
 }
 
 function NumberField({
@@ -478,21 +638,8 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
   const frameRatio = cropShapePreview.clipBounds.width / cropShapePreview.clipBounds.height;
   const frameRatioText = `${Math.round(cropShapePreview.clipBounds.width)}:${Math.round(cropShapePreview.clipBounds.height)}`;
   const storedCrop = useMemo(
-    () =>
-      panel.image?.crop
-        ? {
-            x: panel.image.crop.x,
-            y: panel.image.crop.y,
-            width: panel.image.crop.width,
-            height: panel.image.crop.height
-          }
-        : {
-            x: 0,
-            y: 0,
-            width: naturalWidth,
-            height: naturalHeight
-          },
-    [naturalHeight, naturalWidth, panel.image?.crop?.height, panel.image?.crop?.width, panel.image?.crop?.x, panel.image?.crop?.y]
+    () => createStoredCropDraft(panel.image?.crop, naturalWidth, naturalHeight),
+    [naturalHeight, naturalWidth, panel.image?.crop]
   );
   const initialCrop: CropDraft = useMemo(
     () =>
@@ -504,6 +651,11 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
       ),
     [cropShapePreview.clipBounds.height, cropShapePreview.clipBounds.width, storedCrop, visibleCropZoom]
   );
+  const maxVisibleCrop = useMemo(
+    () => createCenteredVisibleCropWithRatio(naturalWidth, naturalHeight, frameRatio, visibleCropZoom),
+    [frameRatio, naturalHeight, naturalWidth, visibleCropZoom]
+  );
+  const cropEdges = useMemo(() => buildCropEdges(cropShapePreview.normalizedPoints), [cropShapePreview.normalizedPoints]);
 
   const [draft, setDraft] = useState<CropDraft>(initialCrop);
   const [dragState, setDragState] = useState<CropDragState | null>(null);
@@ -525,53 +677,17 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
     return null;
   }
 
-  const scale = Math.min(1, 920 / naturalWidth, 560 / naturalHeight);
-  const displayWidth = Math.max(1, Math.round(naturalWidth * scale));
-  const displayHeight = Math.max(1, Math.round(naturalHeight * scale));
+  const { scale, displayWidth, displayHeight } = getCropDisplaySize(naturalWidth, naturalHeight);
   const draftStyle = createScaledStyle(draft, scale);
+  // When the panel is zoomed in, we visualize the larger stored crop that preserves the visible frame.
   const storedPreview = Math.abs(visibleCropZoom - 1) > 0.001 ? expandCropAroundCenter(draft, visibleCropZoom) : null;
   const storedPreviewStyle = storedPreview ? createScaledStyle(storedPreview, scale) : null;
-  const cropEdges: { edge: ResizeEdge; start: Point; end: Point; mid: Point }[] = [
-    {
-      edge: "top",
-      start: cropShapePreview.normalizedPoints[0],
-      end: cropShapePreview.normalizedPoints[1],
-      mid: {
-        x: (cropShapePreview.normalizedPoints[0].x + cropShapePreview.normalizedPoints[1].x) / 2,
-        y: (cropShapePreview.normalizedPoints[0].y + cropShapePreview.normalizedPoints[1].y) / 2
-      }
-    },
-    {
-      edge: "right",
-      start: cropShapePreview.normalizedPoints[1],
-      end: cropShapePreview.normalizedPoints[2],
-      mid: {
-        x: (cropShapePreview.normalizedPoints[1].x + cropShapePreview.normalizedPoints[2].x) / 2,
-        y: (cropShapePreview.normalizedPoints[1].y + cropShapePreview.normalizedPoints[2].y) / 2
-      }
-    },
-    {
-      edge: "bottom",
-      start: cropShapePreview.normalizedPoints[2],
-      end: cropShapePreview.normalizedPoints[3],
-      mid: {
-        x: (cropShapePreview.normalizedPoints[2].x + cropShapePreview.normalizedPoints[3].x) / 2,
-        y: (cropShapePreview.normalizedPoints[2].y + cropShapePreview.normalizedPoints[3].y) / 2
-      }
-    },
-    {
-      edge: "left",
-      start: cropShapePreview.normalizedPoints[3],
-      end: cropShapePreview.normalizedPoints[0],
-      mid: {
-        x: (cropShapePreview.normalizedPoints[3].x + cropShapePreview.normalizedPoints[0].x) / 2,
-        y: (cropShapePreview.normalizedPoints[3].y + cropShapePreview.normalizedPoints[0].y) / 2
-      }
-    }
-  ];
 
   const toPoint = (event: PointerEvent<Element>) =>
     toNaturalPoint(event, overlayRef.current, scale, naturalWidth, naturalHeight);
+  const resolveDraft = (activeDragState: CropDragState, point: Point) =>
+    updateDraftForDragState(activeDragState, point, naturalWidth, naturalHeight, frameRatio, visibleCropZoom);
+  const updateDraftFromPoint = (activeDragState: CropDragState, point: Point) => setDraft(resolveDraft(activeDragState, point));
 
   const startMove = (event: PointerEvent<Element>) => {
     if (!isMainPointer(event)) {
@@ -603,7 +719,7 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
       edge,
       startCrop: draft
     };
-    setDraft(updateDraftForDragState(nextDragState, point, naturalWidth, naturalHeight, frameRatio, visibleCropZoom));
+    updateDraftFromPoint(nextDragState, point);
     setDragState(nextDragState);
     beginPointerCapture(overlayRef.current, event.pointerId);
   };
@@ -615,7 +731,7 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
 
     event.preventDefault();
     const point = toPoint(event);
-    setDraft(updateDraftForDragState(dragState, point, naturalWidth, naturalHeight, frameRatio, visibleCropZoom));
+    updateDraftFromPoint(dragState, point);
   };
 
   const stopDrag = (pointerId: number) => {
@@ -635,7 +751,7 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
 
     event.preventDefault();
     const point = toPoint(event);
-    setDraft(updateDraftForDragState(dragState, point, naturalWidth, naturalHeight, frameRatio, visibleCropZoom));
+    updateDraftFromPoint(dragState, point);
     stopDrag(event.pointerId);
   };
 
@@ -702,85 +818,23 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
             onPointerUp={onOverlayPointerUp}
             onPointerCancel={onOverlayPointerCancel}
           >
-            {storedPreviewStyle ? (
-              <div className="pointer-events-none absolute" style={storedPreviewStyle}>
-                <svg
-                  className="absolute inset-0 block h-full w-full overflow-visible"
-                  viewBox="0 0 100 100"
-                  preserveAspectRatio="none"
-                >
-                  <polygon
-                    points={cropShapePreview.svgPoints}
-                    fill="rgba(34, 211, 238, 0.08)"
-                    stroke="rgb(165 243 252)"
-                    strokeWidth="1.5"
-                    strokeDasharray="5 4"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                </svg>
-              </div>
-            ) : null}
-            <div className="absolute" style={draftStyle}>
-              <svg
-                className="absolute inset-0 block h-full w-full overflow-visible"
-                viewBox="0 0 100 100"
-                preserveAspectRatio="none"
-              >
-                <polygon
-                  points={cropShapePreview.svgPoints}
-                  fill="rgba(34, 211, 238, 0.10)"
-                  className="cursor-move"
-                  onPointerDown={startMove}
-                />
-                <polygon
-                  points={cropShapePreview.svgPoints}
-                  fill="none"
-                  stroke="rgb(103 232 249)"
-                  strokeWidth="1.8"
-                  vectorEffect="non-scaling-stroke"
-                />
-                {cropEdges.map((edge) => (
-                  <g key={edge.edge}>
-                    <line
-                      x1={edge.start.x * 100}
-                      y1={edge.start.y * 100}
-                      x2={edge.end.x * 100}
-                      y2={edge.end.y * 100}
-                      stroke="transparent"
-                      strokeWidth="14"
-                      vectorEffect="non-scaling-stroke"
-                      style={{ cursor: getHandleCursor(edge.edge) }}
-                      onPointerDown={startResize(edge.edge)}
-                    />
-                  </g>
-                ))}
-              </svg>
-              {cropEdges.map((edge) => (
-                <div
-                  key={`${edge.edge}-handle`}
-                  className="absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-100 bg-cyan-400 shadow-[0_0_0_1px_rgba(34,211,238,0.35)]"
-                  style={{
-                    left: `${edge.mid.x * 100}%`,
-                    top: `${edge.mid.y * 100}%`,
-                    cursor: getHandleCursor(edge.edge)
-                  }}
-                  onPointerDown={startResize(edge.edge)}
-                />
-              ))}
-            </div>
+            {storedPreviewStyle ? <CropPreviewFrame style={storedPreviewStyle} svgPoints={cropShapePreview.svgPoints} /> : null}
+            <EditableCropFrame
+              style={draftStyle}
+              svgPoints={cropShapePreview.svgPoints}
+              cropEdges={cropEdges}
+              onMoveStart={startMove}
+              onResizeStart={startResize}
+            />
           </div>
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-[var(--text-primary)]">
-          <span>
-            可见: X {Math.round(draft.x)} Y {Math.round(draft.y)} W {Math.round(draft.width)} H {Math.round(draft.height)}
-          </span>
+          <span>{formatCropDraft("可见", draft)}</span>
           {storedPreview ? (
             <>
               <span className="text-[var(--text-secondary)]">|</span>
-              <span>
-                保存: X {Math.round(storedPreview.x)} Y {Math.round(storedPreview.y)} W {Math.round(storedPreview.width)} H {Math.round(storedPreview.height)}
-              </span>
+              <span>{formatCropDraft("保存", storedPreview)}</span>
             </>
           ) : null}
           <span className="text-[var(--text-secondary)]">|</span>
@@ -795,7 +849,7 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
           </button>
           <button
             className={buttonClass}
-            onClick={() => setDraft(createCenteredVisibleCropWithRatio(naturalWidth, naturalHeight, frameRatio, visibleCropZoom))}
+            onClick={() => setDraft(maxVisibleCrop)}
           >
             匹配比例最大区域
           </button>
