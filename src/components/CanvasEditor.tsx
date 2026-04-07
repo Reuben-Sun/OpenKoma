@@ -35,7 +35,7 @@ export type CanvasEditorHandle = {
 };
 
 const ROTATION_SNAP_ANGLES = Array.from({ length: 72 }, (_value, index) => index * 5);
-const DEFAULT_TRANSFORMER_ANCHORS: string[] = [
+const ALL_TRANSFORMER_ANCHORS: string[] = [
   "top-left",
   "top-center",
   "top-right",
@@ -45,6 +45,7 @@ const DEFAULT_TRANSFORMER_ANCHORS: string[] = [
   "bottom-center",
   "bottom-right"
 ];
+const BUBBLE_TRANSFORMER_ANCHORS: string[] = ["top-center", "middle-left", "middle-right", "bottom-center"];
 
 function formatFilename(projectName: string, ext: "png" | "pdf") {
   const safe = projectName.trim().replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, "_") || "openkoma";
@@ -490,7 +491,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
       return;
     }
 
-    DEFAULT_TRANSFORMER_ANCHORS.forEach((anchorName) => {
+    ALL_TRANSFORMER_ANCHORS.forEach((anchorName) => {
       const anchor = transformer.findOne<Konva.Rect>(`.${anchorName}`);
       if (!anchor) {
         return;
@@ -905,7 +906,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
                 rotateEnabled={selection?.kind === "panel"}
                 resizeEnabled={selection?.kind === "bubble"}
                 flipEnabled={false}
-                enabledAnchors={selection?.kind === "bubble" ? DEFAULT_TRANSFORMER_ANCHORS : []}
+                enabledAnchors={selection?.kind === "bubble" ? BUBBLE_TRANSFORMER_ANCHORS : []}
                 anchorSize={TRANSFORMER_ANCHOR_SIZE}
                 keepRatio={false}
                 anchorStyleFunc={styleTransformerAnchor}
