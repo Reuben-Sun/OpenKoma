@@ -2,13 +2,14 @@ import { Fragment, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, 
 import Konva from "konva";
 import { Circle, Ellipse, Group, Image as KonvaImage, Layer, Line, Rect, Shape, Stage, Text, Transformer } from "react-konva";
 import useImage from "use-image";
-import { Bubble, Panel, PanelShape } from "../types";
+import { Bubble, Panel } from "../types";
 import {
   PANEL_EDGE_HANDLE_KEYS,
   PANEL_SHAPE_HANDLE_KEYS,
   PanelEdgeKey,
   PanelShapeKey,
   Point,
+  getPanelCanvasPoint,
   getPanelEdgeHandlePoint,
   getPanelRenderTransform,
   getPanelShapeGuideLines,
@@ -170,8 +171,8 @@ function PanelSkewHandles({
   onCommit
 }: {
   panel: Panel;
-  onDraftChange: (shape: PanelShape) => void;
-  onCommit: (shape: PanelShape) => void;
+  onDraftChange: (patch: Partial<Panel>) => void;
+  onCommit: (patch: Partial<Panel>) => void;
 }) {
   const shape = normalizePanelShape(panel.shape, panel.width);
   const transform = getPanelRenderTransform(panel);
@@ -200,7 +201,7 @@ function PanelSkewHandles({
       const nextShape = updatePanelShapeHandle(shape, key, panel.width, localPoint.x);
       const nextLocalPoint = getPanelShapeHandlePoint({ width: panel.width, height: panel.height, shape: nextShape }, key);
 
-      return parent.getAbsoluteTransform().point(nextLocalPoint);
+      return getPanelCanvasPoint(panel, nextLocalPoint);
     };
 
   const createEdgeBoundFunc =
@@ -213,10 +214,10 @@ function PanelSkewHandles({
 
       const inverse = parent.getAbsoluteTransform().copy().invert();
       const localPoint = inverse.point(position);
-      const nextShape = updatePanelEdgeHandle(shape, key, panel.width, panel.height, localPoint);
-      const nextLocalPoint = getPanelEdgeHandlePoint({ width: panel.width, height: panel.height, shape: nextShape }, key);
+      const nextPanel = updatePanelEdgeHandle(panel, key, localPoint);
+      const nextLocalPoint = getPanelEdgeHandlePoint(nextPanel, key);
 
-      return parent.getAbsoluteTransform().point(nextLocalPoint);
+      return getPanelCanvasPoint({ ...panel, ...nextPanel }, nextLocalPoint);
     };
 
   return (
@@ -261,7 +262,7 @@ function PanelSkewHandles({
               if (!localPointer) {
                 return;
               }
-              onDraftChange(updatePanelEdgeHandle(shape, key, panel.width, panel.height, localPointer));
+              onDraftChange(updatePanelEdgeHandle(panel, key, localPointer));
             }}
             onDragEnd={(event) => {
               event.cancelBubble = true;
@@ -269,7 +270,7 @@ function PanelSkewHandles({
               if (!localPointer) {
                 return;
               }
-              onCommit(updatePanelEdgeHandle(shape, key, panel.width, panel.height, localPointer));
+              onCommit(updatePanelEdgeHandle(panel, key, localPointer));
             }}
           />
         );
@@ -299,11 +300,15 @@ function PanelSkewHandles({
             }}
             onDragMove={(event) => {
               event.cancelBubble = true;
-              onDraftChange(updatePanelShapeHandle(shape, key, panel.width, event.target.x()));
+              onDraftChange({
+                shape: updatePanelShapeHandle(shape, key, panel.width, event.target.x())
+              });
             }}
             onDragEnd={(event) => {
               event.cancelBubble = true;
-              onCommit(updatePanelShapeHandle(shape, key, panel.width, event.target.x()));
+              onCommit({
+                shape: updatePanelShapeHandle(shape, key, panel.width, event.target.x())
+              });
             }}
           />
         );
@@ -389,7 +394,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
 
   const [draftRect, setDraftRect] = useState<DraftRect | null>(null);
   const [draftStart, setDraftStart] = useState<{ x: number; y: number } | null>(null);
-  const [skewDraft, setSkewDraft] = useState<{ panelId: string; shape: PanelShape } | null>(null);
+  const [panelDraft, setPanelDraft] = useState<{ panelId: string; patch: Partial<Panel> } | null>(null);
 
   const selectedNodeId = useMemo(() => {
     if (!selection) {
@@ -417,11 +422,11 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
 
   useEffect(() => {
     if (!selection || selection.kind !== "panel") {
-      setSkewDraft(null);
+      setPanelDraft(null);
       return;
     }
 
-    setSkewDraft((current) => (current?.panelId === selection.id ? current : null));
+    setPanelDraft((current) => (current?.panelId === selection.id ? current : null));
   }, [selection, activePage.id]);
 
   useEffect(() => {
@@ -686,7 +691,14 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
 
               {activePage.panels.map((panel) => {
                 const selected = selection?.kind === "panel" && selection.id === panel.id;
-                const displayPanel = skewDraft?.panelId === panel.id ? { ...panel, shape: skewDraft.shape } : panel;
+                const displayPanel =
+                  panelDraft?.panelId === panel.id
+                    ? {
+                        ...panel,
+                        ...panelDraft.patch,
+                        shape: panelDraft.patch.shape ?? panel.shape
+                      }
+                    : panel;
                 const transform = getPanelRenderTransform(displayPanel);
 
                 return (
@@ -747,17 +759,15 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
                     {selected ? (
                       <PanelSkewHandles
                         panel={displayPanel}
-                        onDraftChange={(shape) => {
-                          setSkewDraft({
+                        onDraftChange={(patch) => {
+                          setPanelDraft({
                             panelId: panel.id,
-                            shape
+                            patch
                           });
                         }}
-                        onCommit={(shape) => {
-                          setSkewDraft(null);
-                          updatePanel(panel.id, {
-                            shape
-                          });
+                        onCommit={(patch) => {
+                          setPanelDraft(null);
+                          updatePanel(panel.id, patch);
                         }}
                       />
                     ) : null}

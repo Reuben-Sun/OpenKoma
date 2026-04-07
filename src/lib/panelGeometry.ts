@@ -7,7 +7,8 @@ export type Point = {
 export type PanelShapeKey = keyof PanelShape;
 export type PanelEdgeKey = "top" | "right" | "bottom" | "left";
 
-const MIN_PANEL_EDGE_WIDTH = 24;
+const MIN_PANEL_SIZE = 24;
+const MIN_PANEL_EDGE_WIDTH = MIN_PANEL_SIZE;
 export const PANEL_SHAPE_MIN_RATIO = -1;
 export const PANEL_SHAPE_MAX_RATIO = 2;
 export const PANEL_SHAPE_HANDLE_KEYS: PanelShapeKey[] = ["topLeft", "topRight", "bottomRight", "bottomLeft"];
@@ -94,6 +95,20 @@ export function getPanelRenderTransform(panel: Pick<Panel, "x" | "y" | "width" |
     offsetY: panel.height / 2,
     rotation: normalizePanelRotation(panel.rotation)
   };
+}
+
+export function getPanelCanvasPoint(
+  panel: Pick<Panel, "x" | "y" | "width" | "height" | "rotation">,
+  localPoint: Point
+): Point {
+  return rotatePointAround(
+    {
+      x: panel.x + localPoint.x,
+      y: panel.y + localPoint.y
+    },
+    getPanelCenter(panel),
+    panel.rotation
+  );
 }
 
 export function rotatePointAround(point: Point, center: Point, rotation?: number): Point {
@@ -246,48 +261,50 @@ function shiftPanelVerticalEdge(shape: PanelShape, key: "left" | "right", width:
   );
 }
 
-function resizePanelHorizontalEdge(shape: PanelShape, key: "top" | "bottom", width: number, nextY: number, height: number): PanelShape {
-  const minSpan = width * Math.min(0.96, MIN_PANEL_EDGE_WIDTH / Math.max(24, width));
-  const minX = width * PANEL_SHAPE_MIN_RATIO;
-  const maxX = width * PANEL_SHAPE_MAX_RATIO;
-  const currentLeft = (key === "top" ? shape.topLeft : shape.bottomLeft) * width;
-  const currentRight = (key === "top" ? shape.topRight : shape.bottomRight) * width;
-  const inwardPixels = key === "top" ? nextY : height - nextY;
-  const perSideDelta = inwardPixels / 2;
-  const minDelta = Math.max(minX - currentLeft, currentRight - maxX);
-  const maxDelta = Math.min(maxX - currentLeft, currentRight - minX, (currentRight - currentLeft - minSpan) / 2);
-  const clampedDelta = clamp(perSideDelta, minDelta, maxDelta);
-  const nextLeft = currentLeft + clampedDelta;
-  const nextRight = currentRight - clampedDelta;
-
-  return normalizePanelShape(
+function resizePanelHorizontalEdge(
+  panel: Pick<Panel, "x" | "y" | "width" | "height" | "rotation" | "shape">,
+  key: "top" | "bottom",
+  nextY: number
+) {
+  const currentHeight = Math.max(MIN_PANEL_SIZE, panel.height);
+  const nextHeight =
     key === "top"
-      ? {
-          ...shape,
-          topLeft: nextLeft / Math.max(1, width),
-          topRight: nextRight / Math.max(1, width)
-        }
-      : {
-          ...shape,
-          bottomLeft: nextLeft / Math.max(1, width),
-          bottomRight: nextRight / Math.max(1, width)
-        },
-    width
-  );
+      ? Math.max(MIN_PANEL_SIZE, currentHeight - nextY)
+      : Math.max(MIN_PANEL_SIZE, nextY);
+  const centerOffsetY = key === "top" ? (currentHeight - nextHeight) / 2 : (nextHeight - currentHeight) / 2;
+  const rotatedOffset = rotatePointAround({ x: 0, y: centerOffsetY }, { x: 0, y: 0 }, panel.rotation);
+  const currentCenter = getPanelCenter(panel);
+  const nextCenter = {
+    x: currentCenter.x + rotatedOffset.x,
+    y: currentCenter.y + rotatedOffset.y
+  };
+
+  return {
+    x: nextCenter.x - panel.width / 2,
+    y: nextCenter.y - nextHeight / 2,
+    width: panel.width,
+    height: nextHeight,
+    shape: normalizePanelShape(panel.shape, panel.width)
+  };
 }
 
 export function updatePanelEdgeHandle(
-  shape: PanelShape,
+  panel: Pick<Panel, "x" | "y" | "width" | "height" | "rotation" | "shape">,
   key: PanelEdgeKey,
-  width: number,
-  height: number,
   point: Point
-): PanelShape {
+) {
+  const shape = normalizePanelShape(panel.shape, panel.width);
   if (key === "top" || key === "bottom") {
-    return resizePanelHorizontalEdge(shape, key, width, point.y, height);
+    return resizePanelHorizontalEdge(panel, key, point.y);
   }
 
-  return shiftPanelVerticalEdge(shape, key, width, point.x);
+  return {
+    x: panel.x,
+    y: panel.y,
+    width: panel.width,
+    height: panel.height,
+    shape: shiftPanelVerticalEdge(shape, key, panel.width, point.x)
+  };
 }
 
 export function getInsetPanelLocalPoints(
