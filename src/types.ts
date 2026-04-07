@@ -22,12 +22,21 @@ export type PanelImage = {
   naturalHeight?: number;
 };
 
+export type PanelShape = {
+  topLeft: number;
+  topRight: number;
+  bottomRight: number;
+  bottomLeft: number;
+};
+
 export type Panel = {
   id: string;
   x: number;
   y: number;
   width: number;
   height: number;
+  rotation: number;
+  shape: PanelShape;
   borderWidth: number;
   borderColor: string;
   borderRadius: number;

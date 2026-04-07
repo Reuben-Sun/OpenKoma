@@ -1,40 +1,51 @@
 import { useMemo } from "react";
-import { Ellipse, Group, Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva";
+import { Ellipse, Group, Image as KonvaImage, Layer, Rect, Shape, Stage, Text } from "react-konva";
 import useImage from "use-image";
 import { Bubble, Panel, ProjectPage } from "../types";
+import { drawRoundedPolygonPath, getInsetPanelLocalPoints, getPanelRenderTransform, getPolygonBounds } from "../lib/panelGeometry";
 import { useEditorStore } from "../lib/store";
 
 const buttonClass =
   "studio-btn h-8 px-2.5 text-xs tracking-[0.01em] disabled:cursor-not-allowed disabled:opacity-40";
 const dangerButtonClass = `${buttonClass} studio-btn-danger`;
 
-type PathDrawingContext = Pick<CanvasRenderingContext2D, "rect" | "moveTo" | "lineTo" | "quadraticCurveTo">;
+type PathDrawingContext = Pick<CanvasRenderingContext2D, "moveTo" | "lineTo" | "quadraticCurveTo">;
 
-function roundedRectPath(
-  context: PathDrawingContext,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  radius: number
-) {
-  const safeRadius = Math.max(0, Math.min(radius, width / 2, height / 2));
-  if (safeRadius === 0) {
-    context.rect(x, y, width, height);
-    return;
-  }
+function drawPanelPath(context: PathDrawingContext, panel: Pick<Panel, "width" | "height" | "shape" | "borderRadius">, inset = 0) {
+  const points = getInsetPanelLocalPoints(panel, inset);
+  drawRoundedPolygonPath(context, points, Math.max(0, panel.borderRadius - inset));
+}
 
-  const right = x + width;
-  const bottom = y + height;
-  context.moveTo(x + safeRadius, y);
-  context.lineTo(right - safeRadius, y);
-  context.quadraticCurveTo(right, y, right, y + safeRadius);
-  context.lineTo(right, bottom - safeRadius);
-  context.quadraticCurveTo(right, bottom, right - safeRadius, bottom);
-  context.lineTo(x + safeRadius, bottom);
-  context.quadraticCurveTo(x, bottom, x, bottom - safeRadius);
-  context.lineTo(x, y + safeRadius);
-  context.quadraticCurveTo(x, y, x + safeRadius, y);
+function PreviewPanelFill({ panel }: { panel: Panel }) {
+  return (
+    <Shape
+      sceneFunc={(context, shape) => {
+        context.beginPath();
+        drawPanelPath(context, panel);
+        context.closePath();
+        context.fillStrokeShape(shape);
+      }}
+      fill="#ffffff"
+      listening={false}
+    />
+  );
+}
+
+function PreviewPanelBorder({ panel }: { panel: Panel }) {
+  return (
+    <Shape
+      sceneFunc={(context, shape) => {
+        context.beginPath();
+        drawPanelPath(context, panel);
+        context.closePath();
+        context.fillStrokeShape(shape);
+      }}
+      fillEnabled={false}
+      stroke={panel.borderColor}
+      strokeWidth={panel.borderWidth}
+      listening={false}
+    />
+  );
 }
 
 function toVerticalText(text: string) {
@@ -52,8 +63,10 @@ function PreviewPanelImage({ panel }: { panel: Panel }) {
     return null;
   }
 
-  const innerWidth = Math.max(1, panel.width - panel.gap * 2);
-  const innerHeight = Math.max(1, panel.height - panel.gap * 2);
+  const clipPoints = getInsetPanelLocalPoints(panel, panel.gap);
+  const clipBounds = getPolygonBounds(clipPoints);
+  const innerWidth = clipBounds.width;
+  const innerHeight = clipBounds.height;
 
   const crop = panel.image.crop;
   const sourceWidth = crop?.width ?? panel.image.naturalWidth ?? image.width;
@@ -62,17 +75,14 @@ function PreviewPanelImage({ panel }: { panel: Panel }) {
   const drawScale = coverScale * (crop?.scale ?? 1);
   const drawWidth = sourceWidth * drawScale;
   const drawHeight = sourceHeight * drawScale;
-  const offsetX = panel.gap + (innerWidth - drawWidth) / 2;
-  const offsetY = panel.gap + (innerHeight - drawHeight) / 2;
-  const clipX = panel.gap;
-  const clipY = panel.gap;
-  const clipRadius = Math.max(0, panel.borderRadius - panel.gap);
+  const offsetX = clipBounds.minX + (innerWidth - drawWidth) / 2;
+  const offsetY = clipBounds.minY + (innerHeight - drawHeight) / 2;
 
   return (
     <Group
       clipFunc={(context) => {
         context.beginPath();
-        roundedRectPath(context, clipX, clipY, innerWidth, innerHeight, clipRadius);
+        drawPanelPath(context, panel, panel.gap);
         context.closePath();
       }}
       listening={false}
@@ -155,27 +165,26 @@ function PageMiniPreview({ page }: { page: ProjectPage }) {
         <Layer listening={false}>
           <Rect x={0} y={0} width={page.canvas.width} height={page.canvas.height} fill="#f8fafc" listening={false} />
 
-          {page.panels.map((panel) => (
-            <Group key={panel.id} x={panel.x} y={panel.y} width={panel.width} height={panel.height} listening={false}>
-              <Rect
+          {page.panels.map((panel) => {
+            const transform = getPanelRenderTransform(panel);
+            return (
+              <Group
+                key={panel.id}
+                x={transform.x}
+                y={transform.y}
                 width={panel.width}
                 height={panel.height}
-                fill="#ffffff"
-                cornerRadius={panel.borderRadius}
+                offsetX={transform.offsetX}
+                offsetY={transform.offsetY}
+                rotation={transform.rotation}
                 listening={false}
-              />
-              <PreviewPanelImage panel={panel} />
-              <Rect
-                width={panel.width}
-                height={panel.height}
-                cornerRadius={panel.borderRadius}
-                stroke={panel.borderColor}
-                strokeWidth={panel.borderWidth}
-                fillEnabled={false}
-                listening={false}
-              />
-            </Group>
-          ))}
+              >
+                <PreviewPanelFill panel={panel} />
+                <PreviewPanelImage panel={panel} />
+                <PreviewPanelBorder panel={panel} />
+              </Group>
+            );
+          })}
 
           {page.bubbles.map((bubble) => (
             <Group key={bubble.id} x={bubble.x} y={bubble.y} width={bubble.width} height={bubble.height} listening={false}>

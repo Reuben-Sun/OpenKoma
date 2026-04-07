@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { Bubble, BubbleType, CanvasConfig, CanvasPreset, Panel, Project, ProjectPage } from "../types";
+import { normalizePanelRotation, normalizePanelShape, RECT_PANEL_SHAPE } from "./panelGeometry";
 
 export const CANVAS_PRESETS: Record<CanvasPreset, { width: number; height: number; dpi: number }> = {
   A4: {
@@ -29,20 +30,26 @@ export function createCanvasFromPreset(preset: CanvasPreset = "A4"): CanvasConfi
   };
 }
 
-const DEFAULT_PANEL_STYLE: Pick<Panel, "borderColor" | "borderRadius" | "borderWidth" | "gap"> = {
+const DEFAULT_PANEL_STYLE: Pick<Panel, "borderColor" | "borderRadius" | "borderWidth" | "gap" | "rotation" | "shape"> = {
   borderWidth: 4,
   borderColor: "#111827",
   borderRadius: 0,
-  gap: 0
+  gap: 0,
+  rotation: 0,
+  shape: RECT_PANEL_SHAPE
 };
 
 export function createPanel(input: Pick<Panel, "x" | "y" | "width" | "height"> & Partial<Panel>): Panel {
+  const width = Math.max(24, input.width);
+  const height = Math.max(24, input.height);
   return {
     id: input.id ?? uuidv4(),
     x: input.x,
     y: input.y,
-    width: Math.max(24, input.width),
-    height: Math.max(24, input.height),
+    width,
+    height,
+    rotation: normalizePanelRotation(input.rotation ?? DEFAULT_PANEL_STYLE.rotation),
+    shape: normalizePanelShape(input.shape ?? DEFAULT_PANEL_STYLE.shape, width),
     borderColor: input.borderColor ?? DEFAULT_PANEL_STYLE.borderColor,
     borderRadius: input.borderRadius ?? DEFAULT_PANEL_STYLE.borderRadius,
     borderWidth: input.borderWidth ?? DEFAULT_PANEL_STYLE.borderWidth,

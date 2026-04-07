@@ -1,8 +1,18 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { Fragment, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import Konva from "konva";
-import { Ellipse, Group, Image as KonvaImage, Layer, Rect, Stage, Text, Transformer } from "react-konva";
+import { Circle, Ellipse, Group, Image as KonvaImage, Layer, Line, Rect, Shape, Stage, Text, Transformer } from "react-konva";
 import useImage from "use-image";
-import { Bubble, Panel } from "../types";
+import { Bubble, Panel, PanelShape } from "../types";
+import {
+  drawRoundedPolygonPath,
+  getInsetPanelLocalPoints,
+  getPanelRenderTransform,
+  getPolygonBounds,
+  PANEL_SHAPE_MAX_RATIO,
+  PANEL_SHAPE_MIN_RATIO,
+  normalizePanelRotation,
+  normalizePanelShape
+} from "../lib/panelGeometry";
 import { getActivePage, useEditorStore } from "../lib/store";
 
 type DraftRect = {
@@ -16,6 +26,8 @@ export type CanvasEditorHandle = {
   exportPng: () => Promise<void>;
   exportPdf: () => Promise<void>;
 };
+
+const ROTATION_SNAP_ANGLES = Array.from({ length: 72 }, (_value, index) => index * 5);
 
 function formatFilename(projectName: string, ext: "png" | "pdf") {
   const safe = projectName.trim().replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, "_") || "openkoma";
@@ -52,33 +64,58 @@ function waitForStageRefresh(): Promise<void> {
   });
 }
 
-type PathDrawingContext = Pick<CanvasRenderingContext2D, "rect" | "moveTo" | "lineTo" | "quadraticCurveTo">;
+type PathDrawingContext = Pick<CanvasRenderingContext2D, "moveTo" | "lineTo" | "quadraticCurveTo">;
+type PanelShapeKey = keyof PanelShape;
 
-function roundedRectPath(
-  context: PathDrawingContext,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  radius: number
-) {
-  const safeRadius = Math.max(0, Math.min(radius, width / 2, height / 2));
-  if (safeRadius === 0) {
-    context.rect(x, y, width, height);
-    return;
-  }
+const MIN_PANEL_EDGE_WIDTH = 24;
+const SKEW_HANDLE_RADIUS = 7;
+const SKEW_HANDLE_COLOR = "#2563eb";
+const SKEW_GUIDE_COLOR = "rgba(37, 99, 235, 0.35)";
 
-  const right = x + width;
-  const bottom = y + height;
-  context.moveTo(x + safeRadius, y);
-  context.lineTo(right - safeRadius, y);
-  context.quadraticCurveTo(right, y, right, y + safeRadius);
-  context.lineTo(right, bottom - safeRadius);
-  context.quadraticCurveTo(right, bottom, right - safeRadius, bottom);
-  context.lineTo(x + safeRadius, bottom);
-  context.quadraticCurveTo(x, bottom, x, bottom - safeRadius);
-  context.lineTo(x, y + safeRadius);
-  context.quadraticCurveTo(x, y, x + safeRadius, y);
+function getPanelMinEdgeSpan(width: number) {
+  return width * Math.min(0.96, MIN_PANEL_EDGE_WIDTH / Math.max(24, width));
+}
+
+function drawPanelPath(context: PathDrawingContext, panel: Pick<Panel, "width" | "height" | "shape" | "borderRadius">, inset = 0) {
+  const points = getInsetPanelLocalPoints(panel, inset);
+  drawRoundedPolygonPath(context, points, Math.max(0, panel.borderRadius - inset));
+}
+
+function PanelFillShape({ panel }: { panel: Panel }) {
+  return (
+    <Shape
+      sceneFunc={(context, shape) => {
+        context.beginPath();
+        drawPanelPath(context, panel);
+        context.closePath();
+        context.fillStrokeShape(shape);
+      }}
+      fill="#ffffff"
+    />
+  );
+}
+
+function PanelBorderShape({
+  panel,
+  selected
+}: {
+  panel: Panel;
+  selected: boolean;
+}) {
+  return (
+    <Shape
+      sceneFunc={(context, shape) => {
+        context.beginPath();
+        drawPanelPath(context, panel);
+        context.closePath();
+        context.fillStrokeShape(shape);
+      }}
+      fillEnabled={false}
+      stroke={selected ? SKEW_HANDLE_COLOR : panel.borderColor}
+      strokeWidth={selected ? panel.borderWidth + 1 : panel.borderWidth}
+      listening={false}
+    />
+  );
 }
 
 function PanelImageLayer({ panel }: { panel: Panel }) {
@@ -89,8 +126,10 @@ function PanelImageLayer({ panel }: { panel: Panel }) {
     return null;
   }
 
-  const innerWidth = Math.max(1, panel.width - panel.gap * 2);
-  const innerHeight = Math.max(1, panel.height - panel.gap * 2);
+  const clipPoints = getInsetPanelLocalPoints(panel, panel.gap);
+  const clipBounds = getPolygonBounds(clipPoints);
+  const innerWidth = clipBounds.width;
+  const innerHeight = clipBounds.height;
 
   const crop = panel.image.crop;
   const sourceWidth = crop?.width ?? panel.image.naturalWidth ?? image.width;
@@ -99,19 +138,17 @@ function PanelImageLayer({ panel }: { panel: Panel }) {
   const drawScale = coverScale * (crop?.scale ?? 1);
   const drawWidth = sourceWidth * drawScale;
   const drawHeight = sourceHeight * drawScale;
-  const offsetX = panel.gap + (innerWidth - drawWidth) / 2;
-  const offsetY = panel.gap + (innerHeight - drawHeight) / 2;
-  const clipX = panel.gap;
-  const clipY = panel.gap;
-  const clipRadius = Math.max(0, panel.borderRadius - panel.gap);
+  const offsetX = clipBounds.minX + (innerWidth - drawWidth) / 2;
+  const offsetY = clipBounds.minY + (innerHeight - drawHeight) / 2;
 
   return (
     <Group
       clipFunc={(context) => {
         context.beginPath();
-        roundedRectPath(context, clipX, clipY, innerWidth, innerHeight, clipRadius);
+        drawPanelPath(context, panel, panel.gap);
         context.closePath();
       }}
+      listening={false}
     >
       <KonvaImage
         image={image}
@@ -129,7 +166,118 @@ function PanelImageLayer({ panel }: { panel: Panel }) {
               }
             : undefined
         }
+        listening={false}
       />
+    </Group>
+  );
+}
+
+function getHandleY(key: PanelShapeKey, height: number) {
+  return key.startsWith("top") ? 0 : height;
+}
+
+function clampHandleX(shape: PanelShape, key: PanelShapeKey, width: number, nextX: number) {
+  const minSpan = getPanelMinEdgeSpan(width);
+  const minX = width * PANEL_SHAPE_MIN_RATIO;
+  const maxX = width * PANEL_SHAPE_MAX_RATIO;
+  if (key === "topLeft") {
+    return Math.min(Math.max(minX, nextX), width * shape.topRight - minSpan);
+  }
+  if (key === "topRight") {
+    return Math.max(width * shape.topLeft + minSpan, Math.min(maxX, nextX));
+  }
+  if (key === "bottomLeft") {
+    return Math.min(Math.max(minX, nextX), width * shape.bottomRight - minSpan);
+  }
+  return Math.max(width * shape.bottomLeft + minSpan, Math.min(maxX, nextX));
+}
+
+function updateShapeHandle(shape: PanelShape, key: PanelShapeKey, width: number, x: number) {
+  const clampedX = clampHandleX(shape, key, width, x);
+  return normalizePanelShape(
+    {
+      ...shape,
+      [key]: clampedX / Math.max(1, width)
+    },
+    width
+  );
+}
+
+function PanelSkewHandles({
+  panel,
+  onDraftChange,
+  onCommit
+}: {
+  panel: Panel;
+  onDraftChange: (shape: PanelShape) => void;
+  onCommit: (shape: PanelShape) => void;
+}) {
+  const shape = normalizePanelShape(panel.shape, panel.width);
+  const transform = getPanelRenderTransform(panel);
+  const guideTop = [shape.topLeft * panel.width, 0, shape.topRight * panel.width, 0];
+  const guideBottom = [shape.bottomLeft * panel.width, panel.height, shape.bottomRight * panel.width, panel.height];
+
+  const createBoundFunc =
+    (key: PanelShapeKey) =>
+    function dragBoundFunc(this: Konva.Node, position: Konva.Vector2d) {
+      const parent = this.getParent();
+      if (!parent) {
+        return position;
+      }
+
+      const inverse = parent.getAbsoluteTransform().copy().invert();
+      const localPoint = inverse.point(position);
+      const nextShape = updateShapeHandle(shape, key, panel.width, localPoint.x);
+      const nextLocalPoint = {
+        x: nextShape[key] * panel.width,
+        y: getHandleY(key, panel.height)
+      };
+
+      return parent.getAbsoluteTransform().point(nextLocalPoint);
+    };
+
+  const handleKeys: PanelShapeKey[] = ["topLeft", "topRight", "bottomRight", "bottomLeft"];
+
+  return (
+    <Group
+      name="panel-skew-overlay"
+      x={transform.x}
+      y={transform.y}
+      offsetX={transform.offsetX}
+      offsetY={transform.offsetY}
+      rotation={transform.rotation}
+    >
+      <Line points={guideTop} stroke={SKEW_GUIDE_COLOR} strokeWidth={2} dash={[8, 5]} listening={false} />
+      <Line points={guideBottom} stroke={SKEW_GUIDE_COLOR} strokeWidth={2} dash={[8, 5]} listening={false} />
+
+      {handleKeys.map((key) => (
+        <Circle
+          key={key}
+          name="panel-skew-handle"
+          x={shape[key] * panel.width}
+          y={getHandleY(key, panel.height)}
+          radius={SKEW_HANDLE_RADIUS}
+          fill="#dbeafe"
+          stroke={SKEW_HANDLE_COLOR}
+          strokeWidth={2}
+          draggable
+          dragBoundFunc={createBoundFunc(key)}
+          onMouseDown={(event) => {
+            event.cancelBubble = true;
+          }}
+          onTouchStart={(event) => {
+            event.cancelBubble = true;
+          }}
+          onDragMove={(event) => {
+            event.cancelBubble = true;
+            onDraftChange(updateShapeHandle(shape, key, panel.width, event.target.x()));
+          }}
+          onDragEnd={(event) => {
+            event.cancelBubble = true;
+            onCommit(updateShapeHandle(shape, key, panel.width, event.target.x()));
+          }}
+        />
+      ))}
     </Group>
   );
 }
@@ -211,6 +359,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
 
   const [draftRect, setDraftRect] = useState<DraftRect | null>(null);
   const [draftStart, setDraftStart] = useState<{ x: number; y: number } | null>(null);
+  const [skewDraft, setSkewDraft] = useState<{ panelId: string; shape: PanelShape } | null>(null);
 
   const selectedNodeId = useMemo(() => {
     if (!selection) {
@@ -223,6 +372,27 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
 
     return `bubble-${selection.id}`;
   }, [selection]);
+
+  const selectedPanel = useMemo(() => {
+    if (!selection || selection.kind !== "panel") {
+      return undefined;
+    }
+
+    return activePage.panels.find((panel) => panel.id === selection.id);
+  }, [activePage.panels, selection]);
+
+  const liveSnapEnabled =
+    snapSizeTo16 &&
+    (selection?.kind !== "panel" || !selectedPanel || Math.abs(normalizePanelRotation(selectedPanel.rotation)) < 0.001);
+
+  useEffect(() => {
+    if (!selection || selection.kind !== "panel") {
+      setSkewDraft(null);
+      return;
+    }
+
+    setSkewDraft((current) => (current?.panelId === selection.id ? current : null));
+  }, [selection, activePage.id]);
 
   useEffect(() => {
     if (!transformerRef.current || !stageRef.current) {
@@ -375,7 +545,8 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
     const onPanel = Boolean(target?.findAncestor?.(".panel-node", true));
     const onBubble = Boolean(target?.findAncestor?.(".bubble-node", true));
     const onTransformer = Boolean(target?.findAncestor?.(".selection-transformer", true));
-    if (onPanel || onBubble || onTransformer) {
+    const onSkewHandle = Boolean(target?.findAncestor?.(".panel-skew-handle", true) || target?.findAncestor?.(".panel-skew-overlay", true));
+    if (onPanel || onBubble || onTransformer || onSkewHandle) {
       return;
     }
 
@@ -485,69 +656,82 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
 
               {activePage.panels.map((panel) => {
                 const selected = selection?.kind === "panel" && selection.id === panel.id;
+                const displayPanel = skewDraft?.panelId === panel.id ? { ...panel, shape: skewDraft.shape } : panel;
+                const transform = getPanelRenderTransform(displayPanel);
+
                 return (
-                  <Group
-                    key={panel.id}
-                    id={`panel-${panel.id}`}
-                    name="panel-node"
-                    x={panel.x}
-                    y={panel.y}
-                    width={panel.width}
-                    height={panel.height}
-                    draggable
-                    onClick={(event) => {
-                      event.cancelBubble = true;
-                      selectPanel(panel.id);
-                    }}
-                    onTap={(event) => {
-                      event.cancelBubble = true;
-                      selectPanel(panel.id);
-                    }}
-                    onDragEnd={(event) => {
-                      const nextWidth = snapSizeTo16 ? snapSize(panel.width, 24) : panel.width;
-                      const nextHeight = snapSizeTo16 ? snapSize(panel.height, 24) : panel.height;
-                      updatePanel(panel.id, {
-                        x: event.target.x(),
-                        y: event.target.y(),
-                        width: nextWidth,
-                        height: nextHeight
-                      });
-                    }}
-                    onTransformEnd={(event) => {
-                      const node = event.target;
-                      let nextWidth = Math.max(24, node.width() * node.scaleX());
-                      let nextHeight = Math.max(24, node.height() * node.scaleY());
-                      if (snapSizeTo16) {
-                        nextWidth = snapSize(nextWidth, 24);
-                        nextHeight = snapSize(nextHeight, 24);
-                      }
-                      node.scaleX(1);
-                      node.scaleY(1);
-                      updatePanel(panel.id, {
-                        x: node.x(),
-                        y: node.y(),
-                        width: nextWidth,
-                        height: nextHeight
-                      });
-                    }}
-                  >
-                    <Rect
-                      width={panel.width}
-                      height={panel.height}
-                      fill="#ffffff"
-                      cornerRadius={panel.borderRadius}
-                    />
-                    <PanelImageLayer panel={panel} />
-                    <Rect
-                      width={panel.width}
-                      height={panel.height}
-                      cornerRadius={panel.borderRadius}
-                      stroke={selected ? "#2563eb" : panel.borderColor}
-                      strokeWidth={selected ? panel.borderWidth + 1 : panel.borderWidth}
-                      fillEnabled={false}
-                      listening={false}
-                    />
-                  </Group>
+                  <Fragment key={panel.id}>
+                    <Group
+                      id={`panel-${panel.id}`}
+                      name="panel-node"
+                      x={transform.x}
+                      y={transform.y}
+                      width={displayPanel.width}
+                      height={displayPanel.height}
+                      offsetX={transform.offsetX}
+                      offsetY={transform.offsetY}
+                      rotation={transform.rotation}
+                      draggable
+                      onClick={(event) => {
+                        event.cancelBubble = true;
+                        selectPanel(panel.id);
+                      }}
+                      onTap={(event) => {
+                        event.cancelBubble = true;
+                        selectPanel(panel.id);
+                      }}
+                      onDragEnd={(event) => {
+                        const nextWidth = snapSizeTo16 ? snapSize(panel.width, 24) : panel.width;
+                        const nextHeight = snapSizeTo16 ? snapSize(panel.height, 24) : panel.height;
+                        updatePanel(panel.id, {
+                          x: event.target.x() - nextWidth / 2,
+                          y: event.target.y() - nextHeight / 2,
+                          width: nextWidth,
+                          height: nextHeight
+                        });
+                      }}
+                      onTransformEnd={(event) => {
+                        const node = event.target;
+                        let nextWidth = Math.max(24, node.width() * node.scaleX());
+                        let nextHeight = Math.max(24, node.height() * node.scaleY());
+                        if (snapSizeTo16) {
+                          nextWidth = snapSize(nextWidth, 24);
+                          nextHeight = snapSize(nextHeight, 24);
+                        }
+                        node.scaleX(1);
+                        node.scaleY(1);
+                        updatePanel(panel.id, {
+                          x: node.x() - nextWidth / 2,
+                          y: node.y() - nextHeight / 2,
+                          width: nextWidth,
+                          height: nextHeight,
+                          rotation: normalizePanelRotation(node.rotation())
+                        });
+                      }}
+                    >
+                      <PanelFillShape panel={displayPanel} />
+                      <PanelImageLayer panel={displayPanel} />
+                      <PanelBorderShape panel={displayPanel} selected={selected} />
+                    </Group>
+
+                    {selected ? (
+                      <PanelSkewHandles
+                        panel={displayPanel}
+                        onDraftChange={(shape) => {
+                          setSkewDraft({
+                            panelId: panel.id,
+                            shape
+                          });
+                        }}
+                        onCommit={(shape) => {
+                          setSkewDraft(null);
+                          updatePanel(panel.id, {
+                            shape
+                          });
+                        }}
+                      />
+                    ) : null}
+                  </Fragment>
                 );
               })}
 
@@ -622,18 +806,21 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
               <Transformer
                 ref={transformerRef}
                 name="selection-transformer"
-                rotateEnabled={false}
+                rotateEnabled={selection?.kind === "panel"}
                 flipEnabled={false}
                 borderStroke="#2563eb"
                 anchorStroke="#2563eb"
                 anchorFill="#bfdbfe"
+                rotateAnchorOffset={28}
+                rotationSnaps={selection?.kind === "panel" ? ROTATION_SNAP_ANGLES : undefined}
+                rotationSnapTolerance={2}
                 boundBoxFunc={(oldBox, newBox) => {
                   const minSize = selection?.kind === "bubble" ? 30 : 24;
                   if (newBox.width < minSize || newBox.height < minSize) {
                     return oldBox;
                   }
 
-                  if (snapSizeTo16) {
+                  if (liveSnapEnabled) {
                     return {
                       ...newBox,
                       width: snapSize(newBox.width, minSize),

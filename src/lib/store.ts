@@ -18,7 +18,8 @@ import {
   createProjectPage,
   splitGridPanels
 } from "./project";
-import { Bubble, BubbleType, CanvasPreset, CropConfig, Panel, Project, ProjectPage, Selection } from "../types";
+import { getPanelCenter, getPanelImageClipBounds, normalizePanelRotation, normalizePanelShape, rotatePointAround } from "./panelGeometry";
+import { Bubble, BubbleType, CanvasPreset, CropConfig, Panel, PanelShape, Project, ProjectPage, Selection } from "../types";
 
 type HistoryEntry = {
   forward: Operation[];
@@ -181,7 +182,7 @@ type PersistedHistoryLogDocument = {
 const HISTORY_LIMIT = 80;
 const NOTICE_HISTORY_LIMIT = 300;
 const PROJECT_FILE_FORMAT = "openkoma-project";
-const PROJECT_FILE_VERSION = 4;
+const PROJECT_FILE_VERSION = 5;
 const HISTORY_LOG_FORMAT = "openkoma-history-log";
 const HISTORY_LOG_VERSION = 1;
 const PROJECT_JSON_FILENAME = "project.json";
@@ -586,7 +587,8 @@ function createHistoryEntry(previous: Project, next: Project, message?: string):
 }
 
 function applyHistory(project: Project, operations: Operation[]): Project {
-  return applyPatch(cloneProject(project), operations, false, true).newDocument as Project;
+  const nextProject = applyPatch(cloneProject(project), operations, false, true).newDocument as Project;
+  return normalizeLoadedProject(nextProject);
 }
 
 function normalizeNoticeText(notice: string | undefined): string | undefined {
@@ -998,8 +1000,16 @@ function describePanelPatch(patch: Partial<Panel>): string {
     return "已修改分镜提示词";
   }
 
-  if ("x" in patch || "y" in patch || "width" in patch || "height" in patch) {
-    return "已调整分镜位置或尺寸";
+  if ("shape" in patch && !("x" in patch || "y" in patch || "width" in patch || "height" in patch || "rotation" in patch)) {
+    return "已调整分镜斜切";
+  }
+
+  if ("rotation" in patch && !("x" in patch || "y" in patch || "width" in patch || "height" in patch)) {
+    return "已调整分镜倾斜角度";
+  }
+
+  if ("x" in patch || "y" in patch || "width" in patch || "height" in patch || "rotation" in patch || "shape" in patch) {
+    return "已调整分镜位置、尺寸或倾斜";
   }
 
   if ("borderWidth" in patch || "borderRadius" in patch || "borderColor" in patch || "gap" in patch) {
@@ -1047,10 +1057,13 @@ function bubbleTypeLabel(type: BubbleType): string {
 }
 
 function sanitizePanel(panel: Panel): Panel {
+  const width = Math.max(24, panel.width);
   return {
     ...panel,
-    width: Math.max(24, panel.width),
+    width,
     height: Math.max(24, panel.height),
+    rotation: normalizePanelRotation(panel.rotation),
+    shape: normalizePanelShape(panel.shape, width),
     borderRadius: Math.max(0, panel.borderRadius),
     borderWidth: Math.max(0, panel.borderWidth),
     gap: Math.max(0, panel.gap)
@@ -1212,10 +1225,9 @@ function findPanel(project: Project, id: string): Panel | undefined {
   return undefined;
 }
 
-function getPanelFrameRatio(panel: Pick<Panel, "width" | "height" | "gap">): number {
-  const innerWidth = Math.max(1, panel.width - panel.gap * 2);
-  const innerHeight = Math.max(1, panel.height - panel.gap * 2);
-  return innerWidth / innerHeight;
+function getPanelFrameRatio(panel: Pick<Panel, "width" | "height" | "gap" | "shape">): number {
+  const clipBounds = getPanelImageClipBounds(panel);
+  return clipBounds.width / clipBounds.height;
 }
 
 function normalizeCropToRatio(
@@ -1281,6 +1293,76 @@ function replacePanel(panels: Panel[], id: string, patch: Partial<Panel>): Panel
       }
     };
   });
+}
+
+type SplitPanelGeometry = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  shape: PanelShape;
+};
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+function splitPanelIntoGridGeometry(target: Panel, rows: number, cols: number, innerGap: number): SplitPanelGeometry[] {
+  const safeRows = Math.max(1, Math.floor(rows));
+  const safeCols = Math.max(1, Math.floor(cols));
+  const safeGap = Math.max(0, innerGap);
+  const availableHeight = target.height - safeGap * (safeRows - 1);
+  const rowHeight = Math.max(24, Math.floor(availableHeight / safeRows));
+  const shape = normalizePanelShape(target.shape, target.width);
+  const topLeftX = shape.topLeft * target.width;
+  const topRightX = shape.topRight * target.width;
+  const bottomLeftX = shape.bottomLeft * target.width;
+  const bottomRightX = shape.bottomRight * target.width;
+  const referenceHeight = Math.max(1, target.height);
+  const output: SplitPanelGeometry[] = [];
+
+  for (let row = 0; row < safeRows; row += 1) {
+    const rowY = row * (rowHeight + safeGap);
+    const rowBottomY = rowY + rowHeight;
+    const topRatio = clamp(rowY / referenceHeight, 0, 1);
+    const bottomRatio = clamp(rowBottomY / referenceHeight, 0, 1);
+    const rowLeftTop = lerp(topLeftX, bottomLeftX, topRatio);
+    const rowRightTop = lerp(topRightX, bottomRightX, topRatio);
+    const rowLeftBottom = lerp(topLeftX, bottomLeftX, bottomRatio);
+    const rowRightBottom = lerp(topRightX, bottomRightX, bottomRatio);
+    const availableTopWidth = rowRightTop - rowLeftTop - safeGap * (safeCols - 1);
+    const availableBottomWidth = rowRightBottom - rowLeftBottom - safeGap * (safeCols - 1);
+    const topCellWidth = Math.max(24, Math.floor(availableTopWidth / safeCols));
+    const bottomCellWidth = Math.max(24, Math.floor(availableBottomWidth / safeCols));
+
+    for (let col = 0; col < safeCols; col += 1) {
+      const topStart = rowLeftTop + col * (topCellWidth + safeGap);
+      const topEnd = topStart + topCellWidth;
+      const bottomStart = rowLeftBottom + col * (bottomCellWidth + safeGap);
+      const bottomEnd = bottomStart + bottomCellWidth;
+      const minX = Math.min(topStart, bottomStart);
+      const maxX = Math.max(topEnd, bottomEnd);
+      const width = Math.max(24, maxX - minX);
+
+      output.push({
+        x: minX,
+        y: rowY,
+        width,
+        height: rowHeight,
+        shape: normalizePanelShape(
+          {
+            topLeft: (topStart - minX) / width,
+            topRight: (topEnd - minX) / width,
+            bottomRight: (bottomEnd - minX) / width,
+            bottomLeft: (bottomStart - minX) / width
+          },
+          width
+        )
+      });
+    }
+  }
+
+  return output;
 }
 
 function createNewPageName(project: Project): string {
@@ -1770,31 +1852,36 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       }
 
       const innerGap = Math.max(4, target.gap);
-      const availableWidth = target.width - innerGap * (safeCols - 1);
-      const availableHeight = target.height - innerGap * (safeRows - 1);
-      const cellWidth = Math.max(24, Math.floor(availableWidth / safeCols));
-      const cellHeight = Math.max(24, Math.floor(availableHeight / safeRows));
+      const targetCenter = getPanelCenter(target);
+      const targetRotation = normalizePanelRotation(target.rotation);
+      const childGeometry = splitPanelIntoGridGeometry(target, safeRows, safeCols, innerGap);
 
       const children: Panel[] = [];
-      for (let row = 0; row < safeRows; row += 1) {
-        for (let col = 0; col < safeCols; col += 1) {
-          children.push(
-            createPanel({
-              x: target.x + col * (cellWidth + innerGap),
-              y: target.y + row * (cellHeight + innerGap),
-              width: cellWidth,
-              height: cellHeight,
-              borderColor: target.borderColor,
-              borderRadius: target.borderRadius,
-              borderWidth: target.borderWidth,
-              gap: target.gap,
-              parentId: target.id,
-              prompt: target.prompt,
-              negativePrompt: target.negativePrompt
-            })
-          );
-        }
-      }
+      childGeometry.forEach((geometry) => {
+        const localCenter = {
+          x: target.x + geometry.x + geometry.width / 2,
+          y: target.y + geometry.y + geometry.height / 2
+        };
+        const rotatedCenter = rotatePointAround(localCenter, targetCenter, targetRotation);
+
+        children.push(
+          createPanel({
+            x: rotatedCenter.x - geometry.width / 2,
+            y: rotatedCenter.y - geometry.height / 2,
+            width: geometry.width,
+            height: geometry.height,
+            rotation: targetRotation,
+            shape: geometry.shape,
+            borderColor: target.borderColor,
+            borderRadius: target.borderRadius,
+            borderWidth: target.borderWidth,
+            gap: target.gap,
+            parentId: target.id,
+            prompt: target.prompt,
+            negativePrompt: target.negativePrompt
+          })
+        );
+      });
 
       const nextProject = updateActivePage(state.project, (page) => ({
         ...page,
