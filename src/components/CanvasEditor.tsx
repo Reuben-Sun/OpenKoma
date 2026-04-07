@@ -849,7 +849,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
                 rotateEnabled={selection?.kind === "panel"}
                 resizeEnabled={selection?.kind === "bubble"}
                 flipEnabled={false}
-                enabledAnchors={DEFAULT_TRANSFORMER_ANCHORS}
+                enabledAnchors={selection?.kind === "bubble" ? DEFAULT_TRANSFORMER_ANCHORS : []}
                 anchorSize={TRANSFORMER_ANCHOR_SIZE}
                 keepRatio={false}
                 borderStroke="#2563eb"
