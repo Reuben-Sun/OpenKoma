@@ -81,7 +81,7 @@ function waitForStageRefresh(): Promise<void> {
   });
 }
 
-const SKEW_HANDLE_RADIUS = 30;
+const SKEW_HANDLE_RADIUS = 15;
 const SKEW_HANDLE_HIT_STROKE_WIDTH = 42;
 const EDGE_HANDLE_SIZE = 42;
 const EDGE_HANDLE_HIT_STROKE_WIDTH = 42;
