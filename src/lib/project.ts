@@ -88,6 +88,19 @@ export function createBubble(type: BubbleType = "rect", input: Partial<Bubble> =
   };
 }
 
+export function createDefaultPanelForCanvas(
+  canvas: Pick<CanvasConfig, "width" | "height">,
+  input: Partial<Panel> = {}
+): Panel {
+  return createPanel({
+    x: input.x ?? 40,
+    y: input.y ?? 40,
+    width: input.width ?? canvas.width - 80,
+    height: input.height ?? canvas.height - 80,
+    ...input
+  });
+}
+
 type CreatePageInput = {
   id?: string;
   name?: string;
@@ -104,12 +117,7 @@ export function createProjectPage(input: CreatePageInput = {}): ProjectPage {
     (input.withDefaultPanel === false
       ? []
       : [
-          createPanel({
-            x: 40,
-            y: 40,
-            width: canvas.width - 80,
-            height: canvas.height - 80
-          })
+          createDefaultPanelForCanvas(canvas)
         ]);
 
   return {

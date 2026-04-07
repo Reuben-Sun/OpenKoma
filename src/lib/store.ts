@@ -7,6 +7,7 @@ import {
   clamp,
   createBubble as createBubbleFactory,
   createCanvasFromPreset,
+  createDefaultPanelForCanvas,
   createEmptyProject,
   createPanel,
   createProjectPage,
@@ -68,6 +69,7 @@ type EditorStore = {
 
   splitGrid: (rows: number, cols: number) => void;
   splitSelectedPanel: (rows: number, cols: number) => void;
+  addDefaultPanel: () => void;
   createPanelFromRect: (x: number, y: number, width: number, height: number) => void;
 
   selectPanel: (id: string) => void;
@@ -2056,6 +2058,30 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         selection: {
           kind: "panel",
           id: children[0]?.id ?? target.id
+        }
+      };
+    });
+  },
+
+  addDefaultPanel: () => {
+    set((state) => {
+      const activePage = getActivePage(state.project);
+      const panel = createDefaultPanelForCanvas(activePage.canvas);
+      const nextProject = updateActivePage(state.project, (page) => ({
+        ...page,
+        panels: [...page.panels, panel]
+      }));
+
+      const historyState = withHistory(state, nextProject, "已新增默认尺寸分镜");
+      if (!historyState) {
+        return state;
+      }
+
+      return {
+        ...historyState,
+        selection: {
+          kind: "panel",
+          id: panel.id
         }
       };
     });

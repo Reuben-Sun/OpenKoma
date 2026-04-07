@@ -47,6 +47,7 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
   const setAllPanelsStyle = useEditorStore((state) => state.setAllPanelsStyle);
   const splitGrid = useEditorStore((state) => state.splitGrid);
   const splitSelectedPanel = useEditorStore((state) => state.splitSelectedPanel);
+  const addDefaultPanel = useEditorStore((state) => state.addDefaultPanel);
   const toggleManualPanelMode = useEditorStore((state) => state.toggleManualPanelMode);
   const toggleSnapSizeTo16 = useEditorStore((state) => state.toggleSnapSizeTo16);
   const setThemeMode = useEditorStore((state) => state.setThemeMode);
@@ -238,6 +239,12 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
             {activeCategory === "layout" ? (
               <section className={groupClass}>
                 <p className={groupTitleClass}>分镜布局</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button className={primaryButtonClass} onClick={() => addDefaultPanel()}>
+                    新建分镜
+                  </button>
+                  <span className="text-xs text-[var(--text-secondary)]">创建一个与初始默认分镜相同大小的分镜</span>
+                </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-xs text-[var(--text-secondary)]">网格切割</span>
                   <input
