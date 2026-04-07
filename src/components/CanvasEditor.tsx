@@ -82,6 +82,7 @@ function waitForStageRefresh(): Promise<void> {
 }
 
 const SKEW_HANDLE_RADIUS = 15;
+const SKEW_HANDLE_HIT_RADIUS = 30;
 const SKEW_HANDLE_HIT_STROKE_WIDTH = 42;
 const EDGE_HANDLE_SIZE = 42;
 const EDGE_HANDLE_HIT_STROKE_WIDTH = 42;
@@ -287,6 +288,12 @@ function PanelSkewHandles({
             y={handlePoint.y}
             radius={SKEW_HANDLE_RADIUS}
             hitStrokeWidth={SKEW_HANDLE_HIT_STROKE_WIDTH}
+            hitFunc={(context, shape) => {
+              context.beginPath();
+              context.arc(0, 0, SKEW_HANDLE_HIT_RADIUS, 0, Math.PI * 2);
+              context.closePath();
+              context.fillStrokeShape(shape);
+            }}
             fill="#dbeafe"
             stroke={SKEW_HANDLE_COLOR}
             strokeWidth={2}
