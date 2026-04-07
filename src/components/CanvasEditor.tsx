@@ -98,6 +98,8 @@ function styleTransformerAnchor(anchor: Konva.Rect) {
   if (anchor.hasName("top-left")) {
     anchor.visible(false);
     anchor.listening(false);
+    anchor.width(0);
+    anchor.height(0);
   }
 }
 
@@ -428,6 +430,17 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
     snapSizeTo16 &&
     (selection?.kind !== "panel" || !selectedPanel || Math.abs(normalizePanelRotation(selectedPanel.rotation)) < 0.001);
   const enabledTransformerAnchors = selection?.kind === "panel" ? PANEL_TRANSFORMER_ANCHORS : DEFAULT_TRANSFORMER_ANCHORS;
+  const hideTopLeftTransformerAnchor = () => {
+    const anchor = transformerRef.current?.findOne<Konva.Rect>(".top-left");
+    if (!anchor) {
+      return;
+    }
+
+    anchor.visible(false);
+    anchor.listening(false);
+    anchor.width(0);
+    anchor.height(0);
+  };
   const syncTransformerKeepRatio = () => {
     const transformer = transformerRef.current;
     if (!transformer) {
@@ -435,6 +448,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
     }
 
     transformer.keepRatio(shiftPressedRef.current && isCornerTransformerAnchor(transformer.getActiveAnchor()));
+    hideTopLeftTransformerAnchor();
     transformer.getLayer()?.batchDraw();
   };
 
@@ -467,6 +481,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
 
     transformerRef.current.nodes([node]);
     syncTransformerKeepRatio();
+    hideTopLeftTransformerAnchor();
     transformerRef.current.getLayer()?.batchDraw();
   }, [selectedNodeId, activePage.id, activePage.panels, activePage.bubbles]);
 
