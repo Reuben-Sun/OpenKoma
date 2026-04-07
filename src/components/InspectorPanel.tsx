@@ -699,13 +699,22 @@ function PanelInspector({ panel }: { panel: Panel }) {
   const updatePanel = useEditorStore((state) => state.updatePanel);
   const generateImageForPanel = useEditorStore((state) => state.generateImageForPanel);
   const uploadLocalImageForPanel = useEditorStore((state) => state.uploadLocalImageForPanel);
+  const removePanelBackground = useEditorStore((state) => state.removePanelBackground);
+  const upscalePanelImage = useEditorStore((state) => state.upscalePanelImage);
   const generatingPanelId = useEditorStore((state) => state.busy.generatingPanelId);
   const uploadingPanelId = useEditorStore((state) => state.busy.uploadingPanelId);
+  const removingBackgroundPanelId = useEditorStore((state) => state.busy.removingBackgroundPanelId);
+  const upscalingPanelId = useEditorStore((state) => state.busy.upscalingPanelId);
 
   const [cropModalOpen, setCropModalOpen] = useState(false);
   const localImageInputRef = useRef<HTMLInputElement | null>(null);
   const panelRotation = normalizePanelRotation(panel.rotation);
   const panelShape = normalizePanelShape(panel.shape, panel.width);
+  const isGenerating = generatingPanelId === panel.id;
+  const isUploading = uploadingPanelId === panel.id;
+  const isRemovingBackground = removingBackgroundPanelId === panel.id;
+  const isUpscaling = upscalingPanelId === panel.id;
+  const isImageBusy = isUploading || isGenerating || isRemovingBackground || isUpscaling;
 
   useEffect(() => {
     setCropModalOpen(false);
@@ -862,23 +871,49 @@ function PanelInspector({ panel }: { panel: Panel }) {
         <div className="flex flex-wrap items-center gap-2">
           <button
             className={primaryButtonClass}
-            disabled={uploadingPanelId === panel.id}
+            disabled={isImageBusy}
             onClick={() => localImageInputRef.current?.click()}
           >
-            {uploadingPanelId === panel.id ? "导入中..." : "导入本地图片"}
+            {isUploading ? "导入中..." : "导入本地图片"}
           </button>
 
           {panel.image?.original ? (
-            <button className={buttonClass} onClick={() => setCropModalOpen(true)}>
+            <button className={buttonClass} disabled={isImageBusy} onClick={() => setCropModalOpen(true)}>
               打开手动裁剪
             </button>
+          ) : null}
+
+          {panel.image?.original ? (
+            <>
+              <button
+                className={buttonClass}
+                disabled={isImageBusy}
+                onClick={() => {
+                  void removePanelBackground(panel.id);
+                }}
+              >
+                {isRemovingBackground ? "去背景中..." : "去背景"}
+              </button>
+              <button
+                className={buttonClass}
+                disabled={isImageBusy}
+                onClick={() => {
+                  void upscalePanelImage(panel.id);
+                }}
+              >
+                {isUpscaling ? "超分中..." : "超分 x2"}
+              </button>
+            </>
           ) : null}
         </div>
 
         {panel.image?.original ? (
-          <p className="text-xs text-[var(--text-secondary)]">
-            当前图像尺寸: {panel.image.naturalWidth ?? "?"} x {panel.image.naturalHeight ?? "?"}
-          </p>
+          <div className="space-y-1">
+            <p className="text-xs text-[var(--text-secondary)]">
+              当前图像尺寸: {panel.image.naturalWidth ?? "?"} x {panel.image.naturalHeight ?? "?"}
+            </p>
+            <p className="text-xs text-[var(--text-secondary)]">去背景和超分会直接调用顶部“AI 服务”里配置的外部接口。</p>
+          </div>
         ) : (
           <p className="text-xs text-[var(--text-secondary)]">未导入本地图像时，可继续使用 AI 生成。</p>
         )}
@@ -911,12 +946,12 @@ function PanelInspector({ panel }: { panel: Panel }) {
 
         <button
           className={primaryButtonClass}
-          disabled={generatingPanelId === panel.id}
+          disabled={isImageBusy}
           onClick={() => {
             void generateImageForPanel(panel.id);
           }}
         >
-          {generatingPanelId === panel.id ? "生成中..." : "生成图像"}
+          {isGenerating ? "生成中..." : "生成图像"}
         </button>
       </div>
 

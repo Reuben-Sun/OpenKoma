@@ -2,11 +2,13 @@ import { create } from "zustand";
 import { v4 as uuidv4 } from "uuid";
 import { applyPatch, compare, type Operation } from "fast-json-patch";
 import {
-  clearTempProjectSnapshot,
+  createImagePayloadFromSource,
   generateImage,
-  loadProject as loadProjectApi,
-  saveProject as saveProjectApi,
-  saveTempProjectSnapshot,
+  loadAiServiceConfig,
+  normalizeAiServiceConfig,
+  persistAiServiceConfig,
+  removeImageBackground,
+  upscaleImage,
   uploadLocalImage
 } from "./api";
 import {
@@ -19,7 +21,7 @@ import {
   splitGridPanels
 } from "./project";
 import { getPanelCenter, getPanelImageClipBounds, normalizePanelRotation, normalizePanelShape, rotatePointAround } from "./panelGeometry";
-import { Bubble, BubbleType, CanvasPreset, CropConfig, Panel, PanelShape, Project, ProjectPage, Selection } from "../types";
+import { AiServiceConfig, Bubble, BubbleType, CanvasPreset, CropConfig, Panel, PanelShape, Project, ProjectPage, Selection } from "../types";
 
 type HistoryEntry = {
   forward: Operation[];
@@ -38,6 +40,7 @@ export type ThemeMode = "dark" | "light";
 
 type EditorStore = {
   project: Project;
+  aiServiceConfig: AiServiceConfig;
   projectDirectoryHandle?: FileSystemDirectoryHandle;
   projectDirectoryName?: string;
   assetRefMap: Record<string, string>;
@@ -52,6 +55,8 @@ type EditorStore = {
   busy: {
     generatingPanelId?: string;
     uploadingPanelId?: string;
+    removingBackgroundPanelId?: string;
+    upscalingPanelId?: string;
     loadingProject: boolean;
     savingProject: boolean;
   };
@@ -65,6 +70,7 @@ type EditorStore = {
   redo: () => void;
 
   setProjectName: (name: string) => void;
+  setAiServiceConfig: (patch: Partial<AiServiceConfig>) => void;
   setCanvasPreset: (preset: CanvasPreset) => void;
   setCanvasSize: (width: number, height: number) => void;
   setAllPanelsStyle: (style: { borderRadius?: number; borderWidth?: number }) => void;
@@ -94,8 +100,9 @@ type EditorStore = {
   setPanelCrop: (id: string, crop: CropConfig) => void;
   resetPanelCrop: (id: string) => void;
   uploadLocalImageForPanel: (id: string, file: File) => Promise<void>;
-
   generateImageForPanel: (id: string) => Promise<void>;
+  removePanelBackground: (id: string) => Promise<void>;
+  upscalePanelImage: (id: string) => Promise<void>;
 
   saveProject: () => Promise<void>;
   saveProjectAs: () => Promise<void>;
@@ -187,7 +194,9 @@ const HISTORY_LOG_FORMAT = "openkoma-history-log";
 const HISTORY_LOG_VERSION = 1;
 const PROJECT_JSON_FILENAME = "project.json";
 const HISTORY_LOG_FILENAME = "history.log";
+const PROJECT_JSON_EXPORT_SUFFIX = ".openkoma.json";
 const THEME_STORAGE_KEY = "openkoma-theme-mode";
+const UPSCALE_FACTOR = 2;
 
 type ProjectDirectoryPickerWindow = Window & {
   showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle>;
@@ -277,21 +286,74 @@ async function pickProjectDirectory(): Promise<FileSystemDirectoryHandle | null>
   }
 }
 
-function getTempProjectIdForUnsaved(
-  state: Pick<EditorStore, "project" | "projectDirectoryHandle">,
-  fallbackProjectId?: string
-): string | undefined {
-  if (state.projectDirectoryHandle) {
-    return undefined;
+function sanitizeDownloadFilename(value: string): string {
+  const sanitized = sanitizeFilenameSegment(value);
+  return sanitized || "openkoma-project";
+}
+
+function createProjectDownloadFilename(projectName: string): string {
+  return `${sanitizeDownloadFilename(projectName)}${PROJECT_JSON_EXPORT_SUFFIX}`;
+}
+
+function triggerJsonDownload(filename: string, payload: unknown): void {
+  if (typeof document === "undefined") {
+    throw new Error("当前环境不支持下载项目文件");
   }
 
-  const candidate = String(fallbackProjectId ?? state.project.id ?? "").trim();
-  if (!candidate) {
-    return undefined;
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json"
+  });
+  const downloadUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = downloadUrl;
+  anchor.download = filename;
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => {
+    URL.revokeObjectURL(downloadUrl);
+  }, 0);
+}
+
+function pickProjectJsonFile(): Promise<File | null> {
+  if (typeof document === "undefined" || typeof window === "undefined") {
+    return Promise.resolve(null);
   }
 
-  const normalized = candidate.replace(/[^\w.-]+/g, "_").replace(/^_+|_+$/g, "");
-  return normalized || undefined;
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json,application/json";
+    input.style.display = "none";
+    document.body.appendChild(input);
+
+    const cleanup = () => {
+      input.removeEventListener("change", handleChange);
+      window.removeEventListener("focus", handleWindowFocus);
+      input.remove();
+    };
+
+    const handleChange = () => {
+      const file = input.files?.[0] ?? null;
+      cleanup();
+      resolve(file);
+    };
+
+    const handleWindowFocus = () => {
+      window.setTimeout(() => {
+        if (input.files?.length) {
+          return;
+        }
+        cleanup();
+        resolve(null);
+      }, 240);
+    };
+
+    input.addEventListener("change", handleChange, { once: true });
+    window.addEventListener("focus", handleWindowFocus, { once: true });
+    input.click();
+  });
 }
 
 async function readJsonFromDirectory(directory: FileSystemDirectoryHandle, fileName: string): Promise<unknown> {
@@ -833,6 +895,11 @@ type MaterializedSaveResult = {
   unresolvedRefs: string[];
 };
 
+type MaterializedFileExportResult = {
+  document: PersistedProjectDocumentV2;
+  unresolvedRefs: string[];
+};
+
 async function materializeProjectAssetsForSave(
   baseDocument: PersistedProjectDocumentV2,
   destinationDirectory: FileSystemDirectoryHandle,
@@ -870,6 +937,86 @@ async function materializeProjectAssetsForSave(
     },
     runtimeAssetRefMap,
     unresolvedRefs
+  };
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string" && reader.result) {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error("无法导出图片数据"));
+    };
+    reader.onerror = () => reject(new Error("读取图片数据失败"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function materializeProjectAssetsForFileExport(
+  baseDocument: PersistedProjectDocumentV2,
+  sourceDirectory: FileSystemDirectoryHandle | undefined
+): Promise<MaterializedFileExportResult> {
+  const refs = new Set<string>();
+  collectImageOriginalRefs(baseDocument.layout, refs);
+  collectImageOriginalRefs(baseDocument.history, refs);
+
+  const replacement = new Map<string, string>();
+  const unresolvedRefs: string[] = [];
+
+  for (const ref of refs) {
+    const blob = await resolveImageBlobForSave(ref, sourceDirectory);
+    if (!blob) {
+      unresolvedRefs.push(ref);
+      continue;
+    }
+
+    replacement.set(ref, await blobToDataUrl(blob));
+  }
+
+  return {
+    document: {
+      ...baseDocument,
+      layout: mapImageOriginalRefs(baseDocument.layout, replacement),
+      history: mapImageOriginalRefs(baseDocument.history, replacement)
+    },
+    unresolvedRefs
+  };
+}
+
+function appendTransientObjectUrl(urls: string[], url: string): string[] {
+  if (!url.startsWith("blob:") || urls.includes(url)) {
+    return urls;
+  }
+  return [...urls, url];
+}
+
+function scaleCropToImageSize(
+  crop: CropConfig | undefined,
+  previousNaturalWidth: number,
+  previousNaturalHeight: number,
+  nextNaturalWidth: number,
+  nextNaturalHeight: number
+): CropConfig | undefined {
+  if (!crop) {
+    return undefined;
+  }
+
+  const safePrevWidth = Math.max(1, previousNaturalWidth);
+  const safePrevHeight = Math.max(1, previousNaturalHeight);
+  const scaleX = nextNaturalWidth / safePrevWidth;
+  const scaleY = nextNaturalHeight / safePrevHeight;
+  const width = Math.max(1, Math.min(nextNaturalWidth, crop.width * scaleX));
+  const height = Math.max(1, Math.min(nextNaturalHeight, crop.height * scaleY));
+
+  return {
+    x: clamp(crop.x * scaleX, 0, Math.max(0, nextNaturalWidth - width)),
+    y: clamp(crop.y * scaleY, 0, Math.max(0, nextNaturalHeight - height)),
+    width,
+    height,
+    scale: clamp(crop.scale, 0.1, 4)
   };
 }
 
@@ -1388,17 +1535,22 @@ async function runSaveProjectFlow(
   try {
     if (!hasDirectoryPicker()) {
       const state = get();
-      await saveProjectApi(createPersistedProjectDocument(state));
+      const materialized = await materializeProjectAssetsForFileExport(
+        createPersistedProjectDocument(state),
+        state.projectDirectoryHandle
+      );
+      const downloadFilename = createProjectDownloadFilename(state.project.name);
+      triggerJsonDownload(downloadFilename, materialized.document);
       get().setNotice(
-        forcePickDirectory
-          ? "当前环境不支持另存为路径选择，已回退保存到 ./project/project.json（历史在 ./project/history.log）"
-          : "当前环境不支持路径选择，已回退保存到 ./project/project.json（历史在 ./project/history.log）"
+        materialized.unresolvedRefs.length > 0
+          ? `当前环境不支持目录保存，已下载 ${downloadFilename}，但有 ${materialized.unresolvedRefs.length} 张图片未能内嵌`
+          : `当前环境不支持目录保存，已下载 ${downloadFilename}（已内嵌图片和历史）`
       );
       return;
     }
 
     const beforeSaveState = get();
-    const sourceTempProjectId = getTempProjectIdForUnsaved(beforeSaveState);
+    const sourceWasUnsaved = !beforeSaveState.projectDirectoryHandle;
 
     let targetDirectory = forcePickDirectory ? undefined : beforeSaveState.projectDirectoryHandle;
     if (!targetDirectory) {
@@ -1431,9 +1583,9 @@ async function runSaveProjectFlow(
     let nextHistoryFuture = state.historyFuture;
     let nextAssetRefMap = materialized.runtimeAssetRefMap;
     let nextTransientObjectUrls = state.transientObjectUrls;
-    let movedFromTemp = false;
+    let reboundToDirectoryAssets = false;
 
-    if (sourceTempProjectId && materialized.unresolvedRefs.length === 0) {
+    if (sourceWasUnsaved && materialized.unresolvedRefs.length === 0) {
       const rebound = await rebindRuntimeAssetRefsFromDirectory(
         {
           project: state.project,
@@ -1451,7 +1603,7 @@ async function runSaveProjectFlow(
         nextHistoryFuture = rebound.historyFuture;
         nextAssetRefMap = rebound.runtimeAssetRefMap;
         nextTransientObjectUrls = rebound.objectUrls;
-        movedFromTemp = true;
+        reboundToDirectoryAssets = true;
       } else {
         revokeObjectUrls(rebound.objectUrls);
       }
@@ -1467,10 +1619,6 @@ async function runSaveProjectFlow(
       transientObjectUrls: nextTransientObjectUrls
     });
 
-    if (movedFromTemp && sourceTempProjectId) {
-      await clearTempProjectSnapshot(sourceTempProjectId);
-    }
-
     if (materialized.unresolvedRefs.length > 0) {
       get().setNotice(
         `项目已保存到 ${targetDirectory.name}/${PROJECT_JSON_FILENAME}（历史在 ${HISTORY_LOG_FILENAME}），但有 ${materialized.unresolvedRefs.length} 张图片未能写入`
@@ -1479,7 +1627,9 @@ async function runSaveProjectFlow(
       get().setNotice(
         forcePickDirectory
           ? `项目已另存为 ${targetDirectory.name}/${PROJECT_JSON_FILENAME}（历史在 ${HISTORY_LOG_FILENAME}）`
-          : `项目已保存到 ${targetDirectory.name}/${PROJECT_JSON_FILENAME}（历史在 ${HISTORY_LOG_FILENAME}）`
+          : reboundToDirectoryAssets
+            ? `项目已保存到 ${targetDirectory.name}/${PROJECT_JSON_FILENAME}（历史在 ${HISTORY_LOG_FILENAME}），图片已转存到目录资源`
+            : `项目已保存到 ${targetDirectory.name}/${PROJECT_JSON_FILENAME}（历史在 ${HISTORY_LOG_FILENAME}）`
       );
     }
   } catch (error) {
@@ -1497,6 +1647,7 @@ async function runSaveProjectFlow(
 
 export const useEditorStore = create<EditorStore>((set, get) => ({
   project: createEmptyProject(),
+  aiServiceConfig: loadAiServiceConfig(),
   projectDirectoryHandle: undefined,
   projectDirectoryName: undefined,
   assetRefMap: {},
@@ -1511,6 +1662,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   busy: {
     generatingPanelId: undefined,
     uploadingPanelId: undefined,
+    removingBackgroundPanelId: undefined,
+    upscalingPanelId: undefined,
     loadingProject: false,
     savingProject: false
   },
@@ -1610,6 +1763,24 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
       return {
         ...historyState
+      };
+    });
+  },
+
+  setAiServiceConfig: (patch) => {
+    set((state) => {
+      const nextConfig = normalizeAiServiceConfig({
+        ...state.aiServiceConfig,
+        ...patch
+      });
+
+      if (JSON.stringify(nextConfig) === JSON.stringify(state.aiServiceConfig)) {
+        return state;
+      }
+
+      persistAiServiceConfig(nextConfig);
+      return {
+        aiServiceConfig: nextConfig
       };
     });
   },
@@ -2203,8 +2374,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   },
 
   uploadLocalImageForPanel: async (id, file) => {
-    const panel = findPanel(get().project, id);
-    if (!panel) {
+    if (!findPanel(get().project, id)) {
       get().setNotice("找不到分镜");
       return;
     }
@@ -2218,10 +2388,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     }));
 
     try {
-      const tempProjectId = getTempProjectIdForUnsaved(get());
-      const result = await uploadLocalImage(file, {
-        tempProjectId
-      });
+      const result = await uploadLocalImage(file);
       set((state) => {
         const nextProject = updateProjectPanelById(state.project, id, (entry) => ({
           ...entry,
@@ -2234,6 +2401,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         }));
 
         if (!nextProject) {
+          revokeObjectUrls([result.url]);
           return {
             ...withNotice(state, "分镜已不存在")
           };
@@ -2245,7 +2413,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         }
 
         return {
-          ...historyState
+          ...historyState,
+          transientObjectUrls: appendTransientObjectUrl(state.transientObjectUrls, result.url)
         };
       });
     } catch (error) {
@@ -2283,14 +2452,11 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     }));
 
     try {
-      const tempProjectId = getTempProjectIdForUnsaved(get());
-      const result = await generateImage({
+      const result = await generateImage(get().aiServiceConfig, {
         prompt,
         negativePrompt: panel.negativePrompt,
         width: Math.max(64, Math.round(panel.width)),
         height: Math.max(64, Math.round(panel.height))
-      }, {
-        tempProjectId
       });
 
       set((state) => {
@@ -2299,11 +2465,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
           image: {
             original: result.url,
             naturalWidth: result.naturalWidth,
-            naturalHeight: result.naturalHeight
+            naturalHeight: result.naturalHeight,
+            crop: undefined
           }
         }));
 
         if (!nextProject) {
+          revokeObjectUrls([result.url]);
           return {
             ...withNotice(state, "分镜已不存在")
           };
@@ -2315,7 +2483,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         }
 
         return {
-          ...historyState
+          ...historyState,
+          transientObjectUrls: appendTransientObjectUrl(state.transientObjectUrls, result.url)
         };
       });
     } catch (error) {
@@ -2326,6 +2495,157 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         busy: {
           ...state.busy,
           generatingPanelId: undefined
+        }
+      }));
+    }
+  },
+
+  removePanelBackground: async (id) => {
+    const panel = findPanel(get().project, id);
+    if (!panel?.image?.original) {
+      get().setNotice(panel ? "请先给分镜添加图片" : "找不到分镜");
+      return;
+    }
+
+    set((state) => ({
+      busy: {
+        ...state.busy,
+        removingBackgroundPanelId: id
+      },
+      ...withNotice(state, "正在去除背景...")
+    }));
+
+    try {
+      const previousNaturalWidth = Math.max(1, panel.image.naturalWidth ?? panel.width);
+      const previousNaturalHeight = Math.max(1, panel.image.naturalHeight ?? panel.height);
+      const payload = await createImagePayloadFromSource(panel.image.original, previousNaturalWidth, previousNaturalHeight);
+      const result = await removeImageBackground(get().aiServiceConfig, payload);
+
+      set((state) => {
+        const nextProject = updateProjectPanelById(state.project, id, (entry) => {
+          const entryNaturalWidth = Math.max(1, entry.image?.naturalWidth ?? entry.width);
+          const entryNaturalHeight = Math.max(1, entry.image?.naturalHeight ?? entry.height);
+          return {
+            ...entry,
+            image: {
+              original: result.url,
+              naturalWidth: result.naturalWidth,
+              naturalHeight: result.naturalHeight,
+              crop: scaleCropToImageSize(
+                entry.image?.crop,
+                entryNaturalWidth,
+                entryNaturalHeight,
+                result.naturalWidth,
+                result.naturalHeight
+              )
+            }
+          };
+        });
+
+        if (!nextProject) {
+          revokeObjectUrls([result.url]);
+          return {
+            ...withNotice(state, "分镜已不存在")
+          };
+        }
+
+        const historyState = withHistory(state, nextProject, "已去除分镜背景");
+        if (!historyState) {
+          revokeObjectUrls([result.url]);
+          return state;
+        }
+
+        return {
+          ...historyState,
+          transientObjectUrls: appendTransientObjectUrl(state.transientObjectUrls, result.url)
+        };
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "去背景失败";
+      get().setNotice(message);
+    } finally {
+      set((state) => ({
+        busy: {
+          ...state.busy,
+          removingBackgroundPanelId: undefined
+        }
+      }));
+    }
+  },
+
+  upscalePanelImage: async (id) => {
+    const panel = findPanel(get().project, id);
+    if (!panel?.image?.original) {
+      get().setNotice(panel ? "请先给分镜添加图片" : "找不到分镜");
+      return;
+    }
+
+    set((state) => ({
+      busy: {
+        ...state.busy,
+        upscalingPanelId: id
+      },
+      ...withNotice(state, "正在执行超分...")
+    }));
+
+    try {
+      const previousNaturalWidth = Math.max(1, panel.image.naturalWidth ?? panel.width);
+      const previousNaturalHeight = Math.max(1, panel.image.naturalHeight ?? panel.height);
+      const payload = await createImagePayloadFromSource(panel.image.original, previousNaturalWidth, previousNaturalHeight);
+      const result = await upscaleImage(get().aiServiceConfig, {
+        ...payload,
+        scale: UPSCALE_FACTOR,
+        targetWidth: Math.max(1, Math.round(previousNaturalWidth * UPSCALE_FACTOR)),
+        targetHeight: Math.max(1, Math.round(previousNaturalHeight * UPSCALE_FACTOR))
+      });
+
+      set((state) => {
+        const nextProject = updateProjectPanelById(state.project, id, (entry) => {
+          const entryNaturalWidth = Math.max(1, entry.image?.naturalWidth ?? entry.width);
+          const entryNaturalHeight = Math.max(1, entry.image?.naturalHeight ?? entry.height);
+          return {
+            ...entry,
+            image: {
+              original: result.url,
+              naturalWidth: result.naturalWidth,
+              naturalHeight: result.naturalHeight,
+              crop: scaleCropToImageSize(
+                entry.image?.crop,
+                entryNaturalWidth,
+                entryNaturalHeight,
+                result.naturalWidth,
+                result.naturalHeight
+              )
+            }
+          };
+        });
+
+        if (!nextProject) {
+          revokeObjectUrls([result.url]);
+          return {
+            ...withNotice(state, "分镜已不存在")
+          };
+        }
+
+        const historyState = withHistory(state, nextProject, `已完成分镜超分 x${UPSCALE_FACTOR}`);
+        if (!historyState) {
+          revokeObjectUrls([result.url]);
+          return state;
+        }
+
+        return {
+          ...historyState,
+          transientObjectUrls: appendTransientObjectUrl(state.transientObjectUrls, result.url)
+        };
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "超分失败";
+      get().setNotice(message);
+    } finally {
+      set((state) => ({
+        busy: {
+          ...state.busy,
+          upscalingPanelId: undefined
         }
       }));
     }
@@ -2354,12 +2674,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
     try {
       if (!hasDirectoryPicker()) {
-        const loaded = await loadProjectApi();
-        if (!loaded) {
-          get().setNotice("未找到已保存项目");
+        const selectedFile = await pickProjectJsonFile();
+        if (!selectedFile) {
+          get().setNotice("已取消加载");
           return;
         }
 
+        const loaded = JSON.parse(await selectedFile.text()) as unknown;
         const normalized = normalizeLoadedState(loaded);
         if (!normalized) {
           get().setNotice("项目数据格式无效");
@@ -2454,40 +2775,3 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     }
   }
 }));
-
-let tempProjectPersistTimer: ReturnType<typeof setTimeout> | undefined;
-let tempProjectPersistRevision = 0;
-
-useEditorStore.subscribe((state, previousState) => {
-  const changed =
-    state.project !== previousState.project ||
-    state.historyPast !== previousState.historyPast ||
-    state.historyFuture !== previousState.historyFuture ||
-    state.noticeHistory !== previousState.noticeHistory ||
-    state.projectDirectoryHandle !== previousState.projectDirectoryHandle;
-
-  if (!changed) {
-    return;
-  }
-
-  if (tempProjectPersistTimer) {
-    clearTimeout(tempProjectPersistTimer);
-    tempProjectPersistTimer = undefined;
-  }
-
-  const tempProjectId = getTempProjectIdForUnsaved(state);
-  if (!tempProjectId) {
-    return;
-  }
-
-  const snapshot = createPersistedProjectDocument(state);
-  const revision = ++tempProjectPersistRevision;
-  tempProjectPersistTimer = setTimeout(() => {
-    void saveTempProjectSnapshot(tempProjectId, snapshot).catch(() => {
-      // ignored to avoid interfering with editing flow
-    });
-    if (revision === tempProjectPersistRevision) {
-      tempProjectPersistTimer = undefined;
-    }
-  }, 320);
-});

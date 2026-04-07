@@ -1,5 +1,49 @@
 # OpenKoma Memory
 
+## 2026-04-07 - 移除内置后端，改为直连外部 FastAPI
+
+### 架构调整
+- 删除内置 `server/index.js` 本地代理方案，前端不再依赖 Express
+- AI 能力改为浏览器直连外部服务：
+  - 生图
+  - 去背景
+  - 超分
+- 新增 `AiServiceConfig`：
+  - `generateUrl`
+  - `removeBackgroundUrl`
+  - `upscaleUrl`
+  - `authorization`
+- `Authorization` 仅保存在浏览器 `localStorage`，不写入项目文件
+
+### 前端调用约定
+- `src/lib/api.ts` 负责统一请求外部 AI 接口
+- 支持三种成功响应：
+  - 直接返回 `image/*` 二进制
+  - JSON `{ url, naturalWidth?, naturalHeight? }`
+  - JSON `{ imageBase64, mimeType?, naturalWidth?, naturalHeight? }`
+- 去背景 / 超分会把当前分镜图片转成 base64 后再提交
+- 当图片尺寸变化时，会按比例重算已有 crop，尽量保持当前裁剪结果一致
+
+### UI 与交互
+- `Toolbar` 新增“AI 服务”配置区，可填写三个 URL 和共享 `Authorization`
+- `InspectorPanel` 图像区新增：
+  - 去背景
+  - 超分 x2
+- 手动裁剪、去背景、超分共用同一份外部图像链路，不再经过本地后端
+
+### 保存 / 加载
+- 保留目录模式：
+  - 若浏览器支持 `showDirectoryPicker`，保存为 `project.json + history.log + images/*`
+- 新增无目录权限回退：
+  - 保存时下载单个 `.openkoma.json`
+  - 加载时手动选择 `.json`
+  - 尽量把图片以内嵌 data URL 一起写入
+- 之前的未保存项目 temp 快照后端机制已移除
+
+### 文档
+- 新增 `docs/fastapi-api.md`
+- 文档说明了三个接口的请求体、响应体、错误格式、CORS 要求与 FastAPI 类型示例
+
 ## 2026-04-05 - 初版实现（基于 .ai/design.md）
 
 ### 已落地技术栈

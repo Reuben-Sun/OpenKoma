@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Switch } from "@radix-ui/themes";
 import { getActivePage, useEditorStore } from "../lib/store";
+import { AiServiceConfig } from "../types";
 
 const inputClass = "studio-input h-9 px-3 text-sm";
 const selectClass = "studio-select h-9 px-3 text-sm";
@@ -12,15 +13,16 @@ const dangerButtonClass = `${buttonClass} studio-btn-danger`;
 const groupClass = "studio-subtle space-y-2 rounded-2xl p-3";
 const groupTitleClass = "text-[11px] uppercase tracking-[0.16em] text-[var(--text-secondary)]";
 
-type ToolCategory = "canvas" | "layout" | "style" | "objects" | "export";
+type ToolCategory = "canvas" | "layout" | "style" | "objects" | "service" | "export";
 
-const categories: ToolCategory[] = ["canvas", "layout", "style", "objects", "export"];
+const categories: ToolCategory[] = ["canvas", "layout", "style", "objects", "service", "export"];
 
 const categoryTitleMap: Record<ToolCategory, string> = {
   canvas: "画布设置",
   layout: "分镜布局",
   style: "批量样式",
   objects: "对象",
+  service: "AI 服务",
   export: "导出"
 };
 
@@ -37,12 +39,14 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
   const snapSizeTo16 = useEditorStore((state) => state.snapSizeTo16);
   const themeMode = useEditorStore((state) => state.themeMode);
   const busy = useEditorStore((state) => state.busy);
+  const aiServiceConfig = useEditorStore((state) => state.aiServiceConfig);
   const historyPastCount = useEditorStore((state) => state.historyPast.length);
   const historyFutureCount = useEditorStore((state) => state.historyFuture.length);
 
   const undo = useEditorStore((state) => state.undo);
   const redo = useEditorStore((state) => state.redo);
   const setProjectName = useEditorStore((state) => state.setProjectName);
+  const setAiServiceConfig = useEditorStore((state) => state.setAiServiceConfig);
   const setCanvasPreset = useEditorStore((state) => state.setCanvasPreset);
   const setCanvasSize = useEditorStore((state) => state.setCanvasSize);
   const setAllPanelsStyle = useEditorStore((state) => state.setAllPanelsStyle);
@@ -105,6 +109,12 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
 
   const toggleCategory = (category: ToolCategory) => {
     setActiveCategory((current) => (current === category ? null : category));
+  };
+
+  const patchAiServiceConfig = (key: keyof AiServiceConfig) => (value: string) => {
+    setAiServiceConfig({
+      [key]: value
+    } as Partial<AiServiceConfig>);
   };
 
   return (
@@ -352,6 +362,61 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
                     删除选中对象
                   </button>
                 </div>
+              </section>
+            ) : null}
+
+            {activeCategory === "service" ? (
+              <section className={groupClass}>
+                <p className={groupTitleClass}>外部 AI 服务</p>
+                <div className="space-y-1">
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    这里填写你的 FastAPI 地址。应用会直接从前端请求这些接口，并把 Authorization 原样写入请求头。
+                  </p>
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    Authorization 只保存在当前浏览器的 `localStorage`，不会写进项目文件。URL 留空时，对应按钮会提示你先完成配置。
+                  </p>
+                </div>
+
+                <label className="space-y-1">
+                  <span className={groupTitleClass}>生图 URL</span>
+                  <input
+                    className={inputClass}
+                    value={aiServiceConfig.generateUrl}
+                    placeholder="https://your-fastapi.example.com/generate"
+                    onChange={(event) => patchAiServiceConfig("generateUrl")(event.target.value)}
+                  />
+                </label>
+
+                <label className="space-y-1">
+                  <span className={groupTitleClass}>去背景 URL</span>
+                  <input
+                    className={inputClass}
+                    value={aiServiceConfig.removeBackgroundUrl}
+                    placeholder="https://your-fastapi.example.com/remove-background"
+                    onChange={(event) => patchAiServiceConfig("removeBackgroundUrl")(event.target.value)}
+                  />
+                </label>
+
+                <label className="space-y-1">
+                  <span className={groupTitleClass}>超分 URL</span>
+                  <input
+                    className={inputClass}
+                    value={aiServiceConfig.upscaleUrl}
+                    placeholder="https://your-fastapi.example.com/upscale"
+                    onChange={(event) => patchAiServiceConfig("upscaleUrl")(event.target.value)}
+                  />
+                </label>
+
+                <label className="space-y-1">
+                  <span className={groupTitleClass}>Authorization</span>
+                  <input
+                    className={inputClass}
+                    value={aiServiceConfig.authorization}
+                    placeholder="Bearer your-token"
+                    autoComplete="off"
+                    onChange={(event) => patchAiServiceConfig("authorization")(event.target.value)}
+                  />
+                </label>
               </section>
             ) : null}
 

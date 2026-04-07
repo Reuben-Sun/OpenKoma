@@ -8,7 +8,7 @@
   <img alt="license" src="https://img.shields.io/badge/License-Apache%202.0-2ea44f?style=for-the-badge" />
   <img alt="frontend" src="https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-61dafb?style=for-the-badge" />
   <img alt="canvas" src="https://img.shields.io/badge/Canvas-Konva-0ea5e9?style=for-the-badge" />
-  <img alt="backend" src="https://img.shields.io/badge/Backend-Node%20%2B%20Express-111827?style=for-the-badge" />
+  <img alt="ai" src="https://img.shields.io/badge/AI-Browser%20to%20FastAPI-111827?style=for-the-badge" />
   <img alt="state" src="https://img.shields.io/badge/State-Zustand-f59e0b?style=for-the-badge" />
 </p>
 
@@ -16,7 +16,6 @@
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/react/react-original.svg" width="28" alt="React" />
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/typescript/typescript-original.svg" width="28" alt="TypeScript" />
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/nodejs/nodejs-original.svg" width="28" alt="Node.js" />
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/express/express-original.svg" width="28" alt="Express" />
   <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/vitejs/vitejs-original.svg" width="28" alt="Vite" />
 </p>
 
@@ -28,30 +27,29 @@
 </div>
 
 ## Abstract
-OpenKoma is a local-first comic creation environment designed for practical production instead of demo-only workflows. It combines panel composition, bubble editing, local image import with non-destructive crop, multi-page management, and incremental undo/redo history in one reproducible pipeline.
+OpenKoma is a local-first comic creation environment designed for practical production instead of demo-only workflows. It combines panel composition, bubble editing, local image import with non-destructive crop, multi-page management, incremental undo/redo history, and direct integration with external AI image services.
 
-## Why OpenKoma (Core Selling Points)
+## Why OpenKoma
 - Incremental reversible editing: every mutation records forward/backward JSON patches for robust undo/redo.
 - Non-destructive image workflow: original local assets are preserved while crop parameters drive rendering.
-- Aspect-safe crop engine: crop box follows panel ratio, supports edge-resize + drag-move, and auto re-crops after panel resize while preserving center priority.
+- True skewed panels: panels support parallelogram and trapezoid shapes instead of simple rotated rectangles.
 - Multi-page production flow: page list with add/delete/reorder, plus ordered multi-page PDF export.
-- Project-level operation memory: user-facing message log tracks every change, and undo/redo references operation intent.
-- Local-first persistence: unsaved projects auto-snapshot to temp workspace, with save/load/save-as support.
+- Browser-direct AI services: configure external FastAPI endpoints for generation, background removal, and upscaling without a built-in backend server.
+- Local-first persistence: save directly to a picked folder when File System Access is available, or export/import a single `.openkoma.json` file as fallback.
 
 ## Feature Highlights
 - Canvas and layout
   - A4/A3 presets + custom dimensions
   - Grid split, draw-to-create panels, secondary split on selected panel
+  - Skew editing with corner dragging and numeric presets
 - Panel and object editing
   - Drag/resize/select with visual feedback
   - Global one-click style apply (corner radius and border width)
   - Optional 16-multiple size snapping during resize/transform
-- Bubble system
-  - Rectangle / rounded / circle bubbles
-  - Horizontal and vertical text rendering
 - Image workflow
   - Local image import per panel
-  - Manual crop editor with edge drag (resize) and inner drag (move)
+  - Manual crop editor that matches skewed panel shape
+  - Background removal and 2x upscaling via external AI endpoints
   - Display without stretch (cover + clip behavior)
 - Multi-page and export
   - Left page list with live previews
@@ -73,14 +71,28 @@ npm install
 npm run dev
 ```
 
-Default endpoints:
+Default app URL:
 - Web: `http://localhost:5173`
-- API: `http://localhost:3001`
+
+### Configure External AI
+After opening the app, go to the toolbar drawer `AI Service` and fill in:
+- generation URL
+- background removal URL
+- upscale URL
+- shared `Authorization` header value
+
+API contract for your FastAPI service:
+- `docs/fastapi-api.md`
 
 ### Build
 ```bash
 npm run build
 ```
+
+## Persistence
+- With File System Access API support, OpenKoma saves `project.json`, `history.log`, and image assets into the folder you choose.
+- Without it, OpenKoma falls back to downloading and loading a single `.openkoma.json` file with images embedded as data URLs when possible.
+- The AI service `Authorization` value stays in browser `localStorage` and is never written into exported project files.
 
 ## Keyboard Shortcuts
 - `Cmd/Ctrl + Z`: Undo

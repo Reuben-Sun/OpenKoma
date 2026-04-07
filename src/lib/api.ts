@@ -1,72 +1,138 @@
-import { GeneratePayload } from "../types";
+import { AiServiceConfig, GeneratePayload } from "../types";
 
-export type GenerateResponse = {
-  url: string;
-  naturalWidth?: number;
-  naturalHeight?: number;
+const AI_SERVICE_CONFIG_STORAGE_KEY = "openkoma-ai-service-config";
+
+const EMPTY_AI_SERVICE_CONFIG: AiServiceConfig = {
+  generateUrl: "",
+  removeBackgroundUrl: "",
+  upscaleUrl: "",
+  authorization: ""
 };
 
-export type UploadImageResponse = {
+export type ImageResponse = {
   url: string;
   naturalWidth: number;
   naturalHeight: number;
 };
 
-type AssetStorageOptions = {
-  tempProjectId?: string;
+export type ImageRequestPayload = {
+  imageBase64: string;
+  mimeType: string;
+  filename: string;
+  naturalWidth?: number;
+  naturalHeight?: number;
+  scale?: number;
+  targetWidth?: number;
+  targetHeight?: number;
 };
 
-async function parseJson<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    let message = `请求失败: ${response.status}`;
-    try {
-      const body = await response.json();
-      if (typeof body?.error === "string") {
-        message = body.error;
-      }
-    } catch {
-      // ignored
-    }
-    throw new Error(message);
+type JsonImageResponse = {
+  url?: unknown;
+  imageBase64?: unknown;
+  mimeType?: unknown;
+  naturalWidth?: unknown;
+  naturalHeight?: unknown;
+  error?: unknown;
+  detail?: unknown;
+  message?: unknown;
+};
+
+function normalizeConfigValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function normalizeAiServiceConfig(value: unknown): AiServiceConfig {
+  if (!value || typeof value !== "object") {
+    return { ...EMPTY_AI_SERVICE_CONFIG };
   }
-  return (await response.json()) as T;
+
+  return {
+    generateUrl: normalizeConfigValue((value as Partial<AiServiceConfig>).generateUrl),
+    removeBackgroundUrl: normalizeConfigValue((value as Partial<AiServiceConfig>).removeBackgroundUrl),
+    upscaleUrl: normalizeConfigValue((value as Partial<AiServiceConfig>).upscaleUrl),
+    authorization: normalizeConfigValue((value as Partial<AiServiceConfig>).authorization)
+  };
 }
 
-export async function generateImage(payload: GeneratePayload, options: AssetStorageOptions = {}): Promise<GenerateResponse> {
-  const response = await fetch("/api/generate", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      ...payload,
-      tempProjectId: options.tempProjectId
-    })
-  });
+export function loadAiServiceConfig(): AiServiceConfig {
+  if (typeof window === "undefined") {
+    return { ...EMPTY_AI_SERVICE_CONFIG };
+  }
 
-  return parseJson<GenerateResponse>(response);
+  try {
+    const raw = window.localStorage.getItem(AI_SERVICE_CONFIG_STORAGE_KEY);
+    if (!raw) {
+      return { ...EMPTY_AI_SERVICE_CONFIG };
+    }
+    return normalizeAiServiceConfig(JSON.parse(raw));
+  } catch {
+    return { ...EMPTY_AI_SERVICE_CONFIG };
+  }
 }
 
-function fileToBase64(file: File): Promise<string> {
+export function persistAiServiceConfig(config: AiServiceConfig): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(AI_SERVICE_CONFIG_STORAGE_KEY, JSON.stringify(normalizeAiServiceConfig(config)));
+  } catch {
+    // ignored
+  }
+}
+
+function pickJsonErrorMessage(body: JsonImageResponse): string | null {
+  const candidates = [body.error, body.detail, body.message];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return null;
+}
+
+async function readErrorMessage(response: Response): Promise<string> {
+  try {
+    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+    if (contentType.includes("application/json")) {
+      const body = (await response.json()) as JsonImageResponse;
+      const message = pickJsonErrorMessage(body);
+      if (message) {
+        return message;
+      }
+    } else {
+      const text = (await response.text()).trim();
+      if (text) {
+        return text;
+      }
+    }
+  } catch {
+    // ignored
+  }
+
+  return `请求失败: ${response.status}`;
+}
+
+function fileReaderToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
       const raw = typeof reader.result === "string" ? reader.result : "";
       const base64 = raw.includes(",") ? raw.split(",")[1] : raw;
       if (!base64) {
-        reject(new Error("无法读取本地图片"));
+        reject(new Error("无法读取图像数据"));
         return;
       }
       resolve(base64);
     };
-    reader.onerror = () => reject(new Error("读取本地图片失败"));
-    reader.readAsDataURL(file);
+    reader.onerror = () => reject(new Error("读取图像数据失败"));
+    reader.readAsDataURL(blob);
   });
 }
 
-function getImageSize(file: File): Promise<{ naturalWidth: number; naturalHeight: number }> {
+function getImageSizeFromUrl(url: string): Promise<{ naturalWidth: number; naturalHeight: number }> {
   return new Promise((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(file);
     const image = new Image();
 
     image.onload = () => {
@@ -74,88 +140,215 @@ function getImageSize(file: File): Promise<{ naturalWidth: number; naturalHeight
         naturalWidth: image.naturalWidth,
         naturalHeight: image.naturalHeight
       });
-      URL.revokeObjectURL(objectUrl);
     };
 
     image.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
       reject(new Error("无法解析图片尺寸"));
     };
 
-    image.src = objectUrl;
+    image.src = url;
   });
 }
 
-export async function uploadLocalImage(file: File, options: AssetStorageOptions = {}): Promise<UploadImageResponse> {
-  const [base64, size] = await Promise.all([fileToBase64(file), getImageSize(file)]);
+async function getImageSizeFromBlob(blob: Blob): Promise<{ naturalWidth: number; naturalHeight: number }> {
+  const objectUrl = URL.createObjectURL(blob);
 
-  const response = await fetch("/api/images/upload", {
+  try {
+    return await getImageSizeFromUrl(objectUrl);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+function createBlobFromBase64(base64: string, mimeType: string): Blob {
+  const normalized = base64.includes(",") ? base64.split(",")[1] : base64;
+  const binary = atob(normalized);
+  const length = binary.length;
+  const bytes = new Uint8Array(length);
+
+  for (let index = 0; index < length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return new Blob([bytes], {
+    type: mimeType || "image/png"
+  });
+}
+
+function inferFilenameFromSource(url: string, blobType: string): string {
+  try {
+    const parsed = new URL(url, window.location.origin);
+    const candidate = parsed.pathname.split("/").filter(Boolean).pop() ?? "";
+    if (candidate) {
+      return candidate;
+    }
+  } catch {
+    // ignored
+  }
+
+  const mimeMap: Record<string, string> = {
+    "image/png": "panel.png",
+    "image/jpeg": "panel.jpg",
+    "image/jpg": "panel.jpg",
+    "image/webp": "panel.webp",
+    "image/gif": "panel.gif",
+    "image/svg+xml": "panel.svg"
+  };
+
+  return mimeMap[blobType.toLowerCase()] ?? "panel.png";
+}
+
+async function blobToImageResponse(
+  blob: Blob,
+  naturalWidthHint?: number,
+  naturalHeightHint?: number
+): Promise<ImageResponse> {
+  const objectUrl = URL.createObjectURL(blob);
+
+  try {
+    const size =
+      Number.isFinite(naturalWidthHint) && Number.isFinite(naturalHeightHint) && Number(naturalWidthHint) > 0 && Number(naturalHeightHint) > 0
+        ? {
+            naturalWidth: Math.round(Number(naturalWidthHint)),
+            naturalHeight: Math.round(Number(naturalHeightHint))
+          }
+        : await getImageSizeFromUrl(objectUrl);
+
+    return {
+      url: objectUrl,
+      naturalWidth: size.naturalWidth,
+      naturalHeight: size.naturalHeight
+    };
+  } catch (error) {
+    URL.revokeObjectURL(objectUrl);
+    throw error;
+  }
+}
+
+async function fetchImageBlob(url: string): Promise<Blob> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`返回的图像 URL 无法读取: ${response.status}`);
+  }
+  return await response.blob();
+}
+
+async function parseImageResponse(response: Response): Promise<ImageResponse> {
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response));
+  }
+
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (contentType.startsWith("image/")) {
+    const blob = await response.blob();
+    return blobToImageResponse(blob);
+  }
+
+  let body: JsonImageResponse;
+  try {
+    body = (await response.json()) as JsonImageResponse;
+  } catch {
+    throw new Error("图像服务返回格式无效，需要 JSON 或 image/*");
+  }
+
+  const jsonErrorMessage = pickJsonErrorMessage(body);
+  if (jsonErrorMessage) {
+    throw new Error(jsonErrorMessage);
+  }
+
+  if (typeof body.imageBase64 === "string" && body.imageBase64.trim()) {
+    const blob = createBlobFromBase64(
+      body.imageBase64,
+      typeof body.mimeType === "string" && body.mimeType.trim() ? body.mimeType : "image/png"
+    );
+    return blobToImageResponse(blob, Number(body.naturalWidth), Number(body.naturalHeight));
+  }
+
+  if (typeof body.url === "string" && body.url.trim()) {
+    const blob = await fetchImageBlob(body.url);
+    return blobToImageResponse(blob, Number(body.naturalWidth), Number(body.naturalHeight));
+  }
+
+  throw new Error("图像服务返回缺少 url 或 imageBase64");
+}
+
+function buildRequestHeaders(config: AiServiceConfig): HeadersInit {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json"
+  };
+
+  if (config.authorization) {
+    headers.Authorization = config.authorization;
+  }
+
+  return headers;
+}
+
+function getRequiredEndpoint(url: string, label: string): string {
+  const normalized = url.trim();
+  if (!normalized) {
+    throw new Error(`请先在 AI 服务设置中填写${label} URL`);
+  }
+  return normalized;
+}
+
+async function postImageRequest(endpoint: string, config: AiServiceConfig, payload: unknown): Promise<ImageResponse> {
+  const response = await fetch(endpoint, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      filename: file.name,
-      mimeType: file.type,
-      base64,
-      tempProjectId: options.tempProjectId
-    })
+    headers: buildRequestHeaders(config),
+    body: JSON.stringify(payload)
   });
 
-  const body = await parseJson<{ url: string }>(response);
+  return parseImageResponse(response);
+}
+
+export async function uploadLocalImage(file: File): Promise<ImageResponse> {
+  const objectUrl = URL.createObjectURL(file);
+
+  try {
+    const size = await getImageSizeFromUrl(objectUrl);
+    return {
+      url: objectUrl,
+      naturalWidth: size.naturalWidth,
+      naturalHeight: size.naturalHeight
+    };
+  } catch (error) {
+    URL.revokeObjectURL(objectUrl);
+    throw error;
+  }
+}
+
+export async function createImagePayloadFromSource(
+  sourceUrl: string,
+  naturalWidth?: number,
+  naturalHeight?: number
+): Promise<ImageRequestPayload> {
+  const blob = await fetchImageBlob(sourceUrl);
+  const measuredSize =
+    Number.isFinite(naturalWidth) && Number.isFinite(naturalHeight) && Number(naturalWidth) > 0 && Number(naturalHeight) > 0
+      ? {
+          naturalWidth: Math.round(Number(naturalWidth)),
+          naturalHeight: Math.round(Number(naturalHeight))
+        }
+      : await getImageSizeFromBlob(blob);
+
   return {
-    url: body.url,
-    naturalWidth: size.naturalWidth,
-    naturalHeight: size.naturalHeight
+    imageBase64: await fileReaderToBase64(blob),
+    mimeType: blob.type || "image/png",
+    filename: inferFilenameFromSource(sourceUrl, blob.type),
+    naturalWidth: measuredSize.naturalWidth,
+    naturalHeight: measuredSize.naturalHeight
   };
 }
 
-export async function saveProject(project: unknown): Promise<void> {
-  const response = await fetch("/api/project/save", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ project })
-  });
-
-  await parseJson<{ ok: true }>(response);
+export async function generateImage(config: AiServiceConfig, payload: GeneratePayload): Promise<ImageResponse> {
+  return postImageRequest(getRequiredEndpoint(config.generateUrl, "生图"), config, payload);
 }
 
-export async function loadProject(): Promise<unknown | null> {
-  const response = await fetch("/api/project/load", {
-    method: "GET"
-  });
-
-  const body = await parseJson<{ project: unknown | null }>(response);
-  return body.project;
+export async function removeImageBackground(config: AiServiceConfig, payload: ImageRequestPayload): Promise<ImageResponse> {
+  return postImageRequest(getRequiredEndpoint(config.removeBackgroundUrl, "去背景"), config, payload);
 }
 
-export async function saveTempProjectSnapshot(projectId: string, project: unknown): Promise<void> {
-  const response = await fetch("/api/project/temp/save", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      projectId,
-      project
-    })
-  });
-
-  await parseJson<{ ok: true }>(response);
-}
-
-export async function clearTempProjectSnapshot(projectId: string): Promise<void> {
-  const response = await fetch("/api/project/temp/clear", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      projectId
-    })
-  });
-
-  await parseJson<{ ok: true }>(response);
+export async function upscaleImage(config: AiServiceConfig, payload: ImageRequestPayload): Promise<ImageResponse> {
+  return postImageRequest(getRequiredEndpoint(config.upscaleUrl, "超分"), config, payload);
 }

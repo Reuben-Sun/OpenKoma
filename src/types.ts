@@ -81,6 +81,13 @@ export type Project = {
   activePageId: string;
 };
 
+export type AiServiceConfig = {
+  generateUrl: string;
+  removeBackgroundUrl: string;
+  upscaleUrl: string;
+  authorization: string;
+};
+
 export type Selection =
   | {
       kind: "panel";
