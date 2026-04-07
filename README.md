@@ -34,7 +34,7 @@ OpenKoma is a local-first comic creation environment designed for practical prod
 - Non-destructive image workflow: original local assets are preserved while crop parameters drive rendering.
 - True skewed panels: panels support parallelogram and trapezoid shapes instead of simple rotated rectangles.
 - Multi-page production flow: page list with add/delete/reorder, plus ordered multi-page PDF export.
-- Browser-direct AI services: configure external FastAPI endpoints for generation, background removal, and upscaling without a built-in backend server.
+- Browser-direct AI services: configure one external FastAPI service URL for generation, background removal, upscaling, and health checks without a built-in backend server.
 - Local-first persistence: save directly to a picked folder when File System Access is available, or export/import a single `.openkoma.json` file as fallback.
 
 ## Feature Highlights
@@ -75,11 +75,15 @@ Default app URL:
 - Web: `http://localhost:5173`
 
 ### Configure External AI
-After opening the app, go to the toolbar drawer `AI Service` and fill in:
-- generation URL
-- background removal URL
-- upscale URL
-- shared `Authorization` header value
+After opening the app, go to the toolbar drawer `Service Config` and fill in:
+- service URL
+- optional `Authorization` header value
+
+OpenKoma will then call these fixed endpoints automatically:
+- `POST <baseUrl>/generate`
+- `POST <baseUrl>/remove-background`
+- `POST <baseUrl>/upscale`
+- `GET <baseUrl>/health`
 
 API contract for your FastAPI service:
 - `docs/fastapi-api.md`

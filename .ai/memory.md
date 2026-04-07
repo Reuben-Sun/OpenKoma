@@ -1,5 +1,26 @@
 # OpenKoma Memory
 
+## 2026-04-07 - 服务配置改为单一 baseUrl，并加入 health 检查
+
+### 配置方式
+- `AiServiceConfig` 收敛为：
+  - `baseUrl`
+  - `authorization`
+- `Toolbar` 中的服务入口文案从“AI 服务”调整为“服务配置”
+- 抽屉里只保留：
+  - 服务 URL
+  - 可选身份认证
+  - `检查 /health` 按钮
+
+### 前端请求约定
+- 前端不再要求分别填写三个接口 URL，而是从 `baseUrl` 派生固定端点：
+  - `POST /generate`
+  - `POST /remove-background`
+  - `POST /upscale`
+  - `GET /health`
+- `Authorization` 依旧原样写入请求头；为空时不发送
+- 兼容旧版本地配置：若浏览器里还保留历史的三个 URL，会尽量自动推导出新的 `baseUrl`
+
 ## 2026-04-07 - 移除内置后端，改为直连外部 FastAPI
 
 ### 架构调整

@@ -3,9 +3,7 @@ import { AiServiceConfig, GeneratePayload } from "../types";
 const AI_SERVICE_CONFIG_STORAGE_KEY = "openkoma-ai-service-config";
 
 const EMPTY_AI_SERVICE_CONFIG: AiServiceConfig = {
-  generateUrl: "",
-  removeBackgroundUrl: "",
-  upscaleUrl: "",
+  baseUrl: "",
   authorization: ""
 };
 
@@ -37,8 +35,59 @@ type JsonImageResponse = {
   message?: unknown;
 };
 
+type HealthResponse = {
+  message: string;
+  detail?: string;
+};
+
+type LegacyAiServiceConfig = {
+  baseUrl?: unknown;
+  generateUrl?: unknown;
+  removeBackgroundUrl?: unknown;
+  upscaleUrl?: unknown;
+  authorization?: unknown;
+};
+
 function normalizeConfigValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function trimTrailingSlashes(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function extractBaseUrlFromEndpoint(endpoint: unknown, expectedPath: string): string {
+  const normalizedEndpoint = normalizeConfigValue(endpoint);
+  if (!normalizedEndpoint) {
+    return "";
+  }
+
+  const trimmedPath = `/${expectedPath.replace(/^\/+/, "")}`;
+  if (normalizedEndpoint.endsWith(trimmedPath)) {
+    return trimTrailingSlashes(normalizedEndpoint.slice(0, -trimmedPath.length));
+  }
+
+  return trimTrailingSlashes(normalizedEndpoint);
+}
+
+function deriveBaseUrlFromLegacyConfig(value: LegacyAiServiceConfig): string {
+  const baseUrl = normalizeConfigValue(value.baseUrl);
+  if (baseUrl) {
+    return trimTrailingSlashes(baseUrl);
+  }
+
+  const legacyEndpoints = [
+    extractBaseUrlFromEndpoint(value.generateUrl, "generate"),
+    extractBaseUrlFromEndpoint(value.removeBackgroundUrl, "remove-background"),
+    extractBaseUrlFromEndpoint(value.upscaleUrl, "upscale")
+  ].filter(Boolean);
+
+  if (legacyEndpoints.length === 0) {
+    return "";
+  }
+
+  const [firstEndpoint] = legacyEndpoints;
+  return firstEndpoint;
 }
 
 export function normalizeAiServiceConfig(value: unknown): AiServiceConfig {
@@ -46,11 +95,11 @@ export function normalizeAiServiceConfig(value: unknown): AiServiceConfig {
     return { ...EMPTY_AI_SERVICE_CONFIG };
   }
 
+  const legacyConfig = value as LegacyAiServiceConfig;
+
   return {
-    generateUrl: normalizeConfigValue((value as Partial<AiServiceConfig>).generateUrl),
-    removeBackgroundUrl: normalizeConfigValue((value as Partial<AiServiceConfig>).removeBackgroundUrl),
-    upscaleUrl: normalizeConfigValue((value as Partial<AiServiceConfig>).upscaleUrl),
-    authorization: normalizeConfigValue((value as Partial<AiServiceConfig>).authorization)
+    baseUrl: deriveBaseUrlFromLegacyConfig(legacyConfig),
+    authorization: normalizeConfigValue(legacyConfig.authorization)
   };
 }
 
@@ -284,12 +333,21 @@ function buildRequestHeaders(config: AiServiceConfig): HeadersInit {
   return headers;
 }
 
-function getRequiredEndpoint(url: string, label: string): string {
-  const normalized = url.trim();
+function buildServiceEndpoint(baseUrl: string, endpointPath: string): string {
+  return `${trimTrailingSlashes(baseUrl)}/${endpointPath.replace(/^\/+/, "")}`;
+}
+
+function getRequiredServiceBaseUrl(config: AiServiceConfig): string {
+  const normalized = trimTrailingSlashes(config.baseUrl);
   if (!normalized) {
-    throw new Error(`请先在 AI 服务设置中填写${label} URL`);
+    throw new Error("请先在服务配置中填写服务 URL");
   }
+
   return normalized;
+}
+
+function getRequiredEndpoint(config: AiServiceConfig, endpointPath: string): string {
+  return buildServiceEndpoint(getRequiredServiceBaseUrl(config), endpointPath);
 }
 
 async function postImageRequest(endpoint: string, config: AiServiceConfig, payload: unknown): Promise<ImageResponse> {
@@ -300,6 +358,60 @@ async function postImageRequest(endpoint: string, config: AiServiceConfig, paylo
   });
 
   return parseImageResponse(response);
+}
+
+function describeHealthPayload(payload: unknown): string | undefined {
+  if (typeof payload === "string" && payload.trim()) {
+    return payload.trim();
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+
+  const body = payload as Record<string, unknown>;
+  const candidates = [body.message, body.detail, body.status];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  if (typeof body.ok === "boolean") {
+    return body.ok ? "服务连接正常" : "服务未就绪";
+  }
+
+  return undefined;
+}
+
+export async function checkAiServiceHealth(config: AiServiceConfig): Promise<HealthResponse> {
+  const response = await fetch(getRequiredEndpoint(config, "health"), {
+    method: "GET",
+    headers: config.authorization
+      ? {
+          Authorization: config.authorization
+        }
+      : undefined
+  });
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response));
+  }
+
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (contentType.includes("application/json")) {
+    const body = (await response.json()) as unknown;
+    return {
+      message: describeHealthPayload(body) ?? "服务连接正常",
+      detail: typeof body === "object" && body && "detail" in (body as Record<string, unknown>) ? describeHealthPayload((body as Record<string, unknown>).detail) : undefined
+    };
+  }
+
+  const text = (await response.text()).trim();
+  return {
+    message: text || "服务连接正常"
+  };
 }
 
 export async function uploadLocalImage(file: File): Promise<ImageResponse> {
@@ -342,13 +454,13 @@ export async function createImagePayloadFromSource(
 }
 
 export async function generateImage(config: AiServiceConfig, payload: GeneratePayload): Promise<ImageResponse> {
-  return postImageRequest(getRequiredEndpoint(config.generateUrl, "生图"), config, payload);
+  return postImageRequest(getRequiredEndpoint(config, "generate"), config, payload);
 }
 
 export async function removeImageBackground(config: AiServiceConfig, payload: ImageRequestPayload): Promise<ImageResponse> {
-  return postImageRequest(getRequiredEndpoint(config.removeBackgroundUrl, "去背景"), config, payload);
+  return postImageRequest(getRequiredEndpoint(config, "remove-background"), config, payload);
 }
 
 export async function upscaleImage(config: AiServiceConfig, payload: ImageRequestPayload): Promise<ImageResponse> {
-  return postImageRequest(getRequiredEndpoint(config.upscaleUrl, "超分"), config, payload);
+  return postImageRequest(getRequiredEndpoint(config, "upscale"), config, payload);
 }

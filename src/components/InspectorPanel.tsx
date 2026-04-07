@@ -912,7 +912,7 @@ function PanelInspector({ panel }: { panel: Panel }) {
             <p className="text-xs text-[var(--text-secondary)]">
               当前图像尺寸: {panel.image.naturalWidth ?? "?"} x {panel.image.naturalHeight ?? "?"}
             </p>
-            <p className="text-xs text-[var(--text-secondary)]">去背景和超分会直接调用顶部“AI 服务”里配置的外部接口。</p>
+            <p className="text-xs text-[var(--text-secondary)]">去背景和超分会直接调用顶部“服务配置”里配置的外部接口。</p>
           </div>
         ) : (
           <p className="text-xs text-[var(--text-secondary)]">未导入本地图像时，可继续使用 AI 生成。</p>

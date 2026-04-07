@@ -82,9 +82,7 @@ export type Project = {
 };
 
 export type AiServiceConfig = {
-  generateUrl: string;
-  removeBackgroundUrl: string;
-  upscaleUrl: string;
+  baseUrl: string;
   authorization: string;
 };
 

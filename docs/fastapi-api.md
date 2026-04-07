@@ -4,17 +4,21 @@ OpenKoma no longer ships with a built-in backend proxy. The app now calls your F
 
 ## Configuration in OpenKoma
 
-The toolbar exposes four fields:
+The toolbar now exposes one service configuration drawer with:
 
-- `generateUrl`: image generation endpoint
-- `removeBackgroundUrl`: background removal endpoint
-- `upscaleUrl`: super-resolution endpoint
-- `Authorization`: copied as-is into the `Authorization` request header
+- `baseUrl`: FastAPI service root, for example `https://your-fastapi.example.com`
+- `Authorization`: optional, copied as-is into the `Authorization` request header
+- `Check /health`: sends `GET <baseUrl>/health`
 
 Notes:
 
 - `Authorization` is optional. If left empty, OpenKoma does not send the header.
 - The value is stored only in the browser `localStorage`; it is not written into project files.
+- OpenKoma derives fixed endpoints from `baseUrl`:
+  - `POST <baseUrl>/generate`
+  - `POST <baseUrl>/remove-background`
+  - `POST <baseUrl>/upscale`
+  - `GET <baseUrl>/health`
 - Because requests come directly from the browser, your FastAPI service must allow CORS for the OpenKoma origin, such as `http://localhost:5173` during development.
 - If an endpoint returns a JSON `url`, that URL must also be browser-accessible with CORS enabled, because OpenKoma will fetch it again to measure the image and keep the workflow consistent.
 
@@ -37,7 +41,7 @@ Authorization: Bearer sk-xxxx
 
 ### Endpoint
 
-`POST <generateUrl>`
+`POST <baseUrl>/generate`
 
 ### Request Body
 
@@ -61,7 +65,7 @@ Authorization: Bearer sk-xxxx
 
 ### Endpoint
 
-`POST <removeBackgroundUrl>`
+`POST <baseUrl>/remove-background`
 
 ### Request Body
 
@@ -87,7 +91,7 @@ Authorization: Bearer sk-xxxx
 
 ### Endpoint
 
-`POST <upscaleUrl>`
+`POST <baseUrl>/upscale`
 
 ### Request Body
 
@@ -116,6 +120,36 @@ Authorization: Bearer sk-xxxx
 - `targetHeight`: integer, optional
 
 Your FastAPI implementation may ignore `scale`, `targetWidth`, or `targetHeight` if it only needs one of them, but OpenKoma will send them.
+
+## 4) Health Check
+
+### Endpoint
+
+`GET <baseUrl>/health`
+
+### Allowed Success Responses
+
+OpenKoma accepts plain text or JSON. Typical examples:
+
+```json
+{
+  "status": "ok"
+}
+```
+
+or
+
+```json
+{
+  "message": "healthy"
+}
+```
+
+or just:
+
+```text
+ok
+```
 
 ## Allowed Success Responses
 
