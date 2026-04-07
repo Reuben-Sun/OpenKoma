@@ -1127,11 +1127,11 @@ function describePanelPatch(patch: Partial<Panel>): string {
 
 function describeBubblePatch(patch: Partial<Bubble>): string {
   if ("text" in patch) {
-    return "已编辑气泡文本";
+    return "已编辑文字内容";
   }
 
   if ("x" in patch || "y" in patch || "width" in patch || "height" in patch) {
-    return "已调整气泡位置或尺寸";
+    return "已调整文字框位置或尺寸";
   }
 
   if (
@@ -1140,22 +1140,23 @@ function describeBubblePatch(patch: Partial<Bubble>): string {
     "fontSize" in patch ||
     "fontFamily" in patch ||
     "background" in patch ||
-    "borderColor" in patch
+    "borderColor" in patch ||
+    "borderWidth" in patch
   ) {
-    return "已修改气泡样式";
+    return "已修改文字样式";
   }
 
-  return "已更新气泡";
+  return "已更新文字";
 }
 
 function bubbleTypeLabel(type: BubbleType): string {
   if (type === "rect") {
-    return "矩形";
+    return "矩形文字框";
   }
   if (type === "rounded") {
-    return "圆角";
+    return "圆角文字框";
   }
-  return "圆形";
+  return "圆形文字框";
 }
 
 function isLocalImageRef(ref: string | undefined): ref is string {
@@ -1216,6 +1217,25 @@ function sanitizePanel(panel: Panel): Panel {
   });
 }
 
+function sanitizeBubble(bubble: Partial<Bubble> | undefined): Bubble {
+  const safeType = bubble?.type === "rounded" || bubble?.type === "circle" || bubble?.type === "rect" ? bubble.type : "rect";
+
+  return createBubbleFactory(safeType, {
+    id: bubble?.id,
+    x: Number.isFinite(bubble?.x) ? bubble?.x : 120,
+    y: Number.isFinite(bubble?.y) ? bubble?.y : 120,
+    width: Number.isFinite(bubble?.width) ? bubble?.width : undefined,
+    height: Number.isFinite(bubble?.height) ? bubble?.height : undefined,
+    text: typeof bubble?.text === "string" ? bubble.text : undefined,
+    direction: bubble?.direction === "vertical" ? "vertical" : "horizontal",
+    fontSize: Number.isFinite(bubble?.fontSize) ? bubble?.fontSize : undefined,
+    fontFamily: typeof bubble?.fontFamily === "string" && bubble.fontFamily.trim() ? bubble.fontFamily : undefined,
+    background: typeof bubble?.background === "string" && bubble.background.trim() ? bubble.background : undefined,
+    borderColor: typeof bubble?.borderColor === "string" && bubble.borderColor.trim() ? bubble.borderColor : undefined,
+    borderWidth: Number.isFinite(bubble?.borderWidth) ? bubble?.borderWidth : undefined
+  });
+}
+
 function sanitizeCanvas(canvas: Partial<ProjectPage["canvas"]> | undefined): ProjectPage["canvas"] {
   const fallback = createCanvasFromPreset("A4");
   const width = Number(canvas?.width ?? fallback.width);
@@ -1234,7 +1254,7 @@ function sanitizeCanvas(canvas: Partial<ProjectPage["canvas"]> | undefined): Pro
 function sanitizePage(page: Partial<ProjectPage> | undefined, index: number): ProjectPage {
   const fallbackName = `第 ${index + 1} 页`;
   const safePanels = Array.isArray(page?.panels) ? page.panels.map((entry) => sanitizePanel(entry)) : [];
-  const safeBubbles = Array.isArray(page?.bubbles) ? page.bubbles : [];
+  const safeBubbles = Array.isArray(page?.bubbles) ? page.bubbles.map((entry) => sanitizeBubble(entry)) : [];
 
   return {
     id: page?.id || uuidv4(),
@@ -2139,7 +2159,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         bubbles: page.bubbles.filter((bubble) => bubble.id !== state.selection?.id)
       }));
 
-      const historyState = withHistory(state, nextProject, "已删除气泡");
+      const historyState = withHistory(state, nextProject, "已删除文字");
       if (!historyState) {
         return state;
       }
@@ -2195,7 +2215,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
             y: patch.y === undefined ? bubble.y : patch.y,
             width: patch.width === undefined ? bubble.width : Math.max(30, patch.width),
             height: patch.height === undefined ? bubble.height : Math.max(30, patch.height),
-            fontSize: patch.fontSize === undefined ? bubble.fontSize : Math.max(8, patch.fontSize)
+            fontSize: patch.fontSize === undefined ? bubble.fontSize : Math.max(8, patch.fontSize),
+            borderWidth: patch.borderWidth === undefined ? bubble.borderWidth : Math.max(0, patch.borderWidth)
           };
         })
       }));
@@ -2219,7 +2240,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         bubbles: [...page.bubbles, bubble]
       }));
 
-      const historyState = withHistory(state, nextProject, `已创建${bubbleTypeLabel(type)}气泡`);
+      const historyState = withHistory(state, nextProject, `已创建${bubbleTypeLabel(type)}`);
       if (!historyState) {
         return state;
       }

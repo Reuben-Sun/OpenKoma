@@ -59,20 +59,32 @@ export function createPanel(input: Pick<Panel, "x" | "y" | "width" | "height"> &
   };
 }
 
-export function createBubble(type: BubbleType): Bubble {
+export function createBubble(type: BubbleType = "rect", input: Partial<Bubble> = {}): Bubble {
+  const safeType = input.type ?? type;
+  const defaultWidth = safeType === "circle" ? 180 : 220;
+  const defaultHeight = safeType === "circle" ? 180 : 160;
+  const safeX = typeof input.x === "number" && Number.isFinite(input.x) ? input.x : 120;
+  const safeY = typeof input.y === "number" && Number.isFinite(input.y) ? input.y : 120;
+  const safeWidth = typeof input.width === "number" && Number.isFinite(input.width) ? input.width : defaultWidth;
+  const safeHeight = typeof input.height === "number" && Number.isFinite(input.height) ? input.height : defaultHeight;
+  const safeFontSize = typeof input.fontSize === "number" && Number.isFinite(input.fontSize) ? input.fontSize : 28;
+  const safeBorderWidth =
+    typeof input.borderWidth === "number" && Number.isFinite(input.borderWidth) ? input.borderWidth : 3;
+
   return {
-    id: uuidv4(),
-    type,
-    x: 120,
-    y: 120,
-    width: type === "circle" ? 180 : 220,
-    height: 160,
-    text: "输入台词",
-    direction: "horizontal",
-    fontSize: 28,
-    fontFamily: "Noto Sans SC",
-    background: "#ffffff",
-    borderColor: "#111827"
+    id: input.id ?? uuidv4(),
+    type: safeType,
+    x: safeX,
+    y: safeY,
+    width: Math.max(30, safeWidth),
+    height: Math.max(30, safeHeight),
+    text: input.text ?? "输入文字",
+    direction: input.direction === "vertical" ? "vertical" : "horizontal",
+    fontSize: Math.max(8, safeFontSize),
+    fontFamily: input.fontFamily ?? "Noto Sans SC",
+    background: input.background ?? "#ffffff",
+    borderColor: input.borderColor ?? "#111827",
+    borderWidth: Math.max(0, safeBorderWidth)
   };
 }
 

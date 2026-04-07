@@ -164,8 +164,8 @@ export default function App() {
           </div>
 
           <div className="flex min-w-0 flex-wrap items-center gap-2 justify-self-end">
-            <span className="studio-chip px-2.5 py-1">Panels {activePage.panels.length}</span>
-            <span className="studio-chip px-2.5 py-1">Bubbles {activePage.bubbles.length}</span>
+            <span className="studio-chip px-2.5 py-1">分镜 {activePage.panels.length}</span>
+            <span className="studio-chip px-2.5 py-1">文字 {activePage.bubbles.length}</span>
           </div>
         </footer>
       </main>

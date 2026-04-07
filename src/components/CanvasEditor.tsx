@@ -338,7 +338,7 @@ function BubbleShape({ bubble }: { bubble: Bubble }) {
         radiusY={bubble.height / 2}
         fill={bubble.background}
         stroke={bubble.borderColor}
-        strokeWidth={3}
+        strokeWidth={bubble.borderWidth}
       />
     );
   }
@@ -349,7 +349,7 @@ function BubbleShape({ bubble }: { bubble: Bubble }) {
       height={bubble.height}
       fill={bubble.background}
       stroke={bubble.borderColor}
-      strokeWidth={3}
+      strokeWidth={bubble.borderWidth}
       cornerRadius={bubble.type === "rounded" ? 30 : 8}
     />
   );

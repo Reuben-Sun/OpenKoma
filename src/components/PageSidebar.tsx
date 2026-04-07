@@ -97,7 +97,7 @@ function PreviewBubbleShape({ bubble }: { bubble: Bubble }) {
         radiusY={bubble.height / 2}
         fill={bubble.background}
         stroke={bubble.borderColor}
-        strokeWidth={3}
+        strokeWidth={bubble.borderWidth}
         listening={false}
       />
     );
@@ -109,7 +109,7 @@ function PreviewBubbleShape({ bubble }: { bubble: Bubble }) {
       height={bubble.height}
       fill={bubble.background}
       stroke={bubble.borderColor}
-      strokeWidth={3}
+      strokeWidth={bubble.borderWidth}
       cornerRadius={bubble.type === "rounded" ? 30 : 8}
       listening={false}
     />
@@ -242,7 +242,7 @@ export default function PageSidebar() {
                   <PageMiniPreview page={page} />
                 </div>
                 <div className="text-[11px] text-[var(--text-secondary)]">
-                  分镜 {page.panels.length} · 气泡 {page.bubbles.length}
+                  分镜 {page.panels.length} · 文字 {page.bubbles.length}
                 </div>
               </button>
 

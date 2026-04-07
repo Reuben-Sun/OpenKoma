@@ -62,6 +62,7 @@ export type Bubble = {
   fontFamily: string;
   background: string;
   borderColor: string;
+  borderWidth: number;
 };
 
 export type ProjectPage = {

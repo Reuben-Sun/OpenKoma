@@ -11,15 +11,15 @@ const dangerButtonClass = `${buttonClass} studio-btn-danger`;
 const groupClass = "studio-subtle space-y-2 rounded-2xl p-3";
 const groupTitleClass = "text-[11px] uppercase tracking-[0.16em] text-[var(--text-secondary)]";
 
-type ToolCategory = "canvas" | "layout" | "style" | "objects" | "export";
+type ToolCategory = "canvas" | "layout" | "style" | "text" | "export";
 
-const categories: ToolCategory[] = ["canvas", "layout", "style", "objects", "export"];
+const categories: ToolCategory[] = ["canvas", "layout", "style", "text", "export"];
 
 const categoryTitleMap: Record<ToolCategory, string> = {
   canvas: "画布设置",
   layout: "分镜布局",
   style: "批量样式",
-  objects: "对象",
+  text: "文字",
   export: "导出"
 };
 
@@ -336,23 +336,20 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
               </section>
             ) : null}
 
-            {activeCategory === "objects" ? (
+            {activeCategory === "text" ? (
               <section className={groupClass}>
-                <p className={groupTitleClass}>对象</p>
+                <p className={groupTitleClass}>文字</p>
                 <div className="flex flex-wrap items-center gap-2">
                   <button className={buttonClass} onClick={() => addBubble("rect")}>
-                    新建矩形气泡
-                  </button>
-                  <button className={buttonClass} onClick={() => addBubble("rounded")}>
-                    新建圆角气泡
-                  </button>
-                  <button className={buttonClass} onClick={() => addBubble("circle")}>
-                    新建圆形气泡
+                    新增文字
                   </button>
                 </div>
+                <p className="text-xs leading-5 text-[var(--text-secondary)]">
+                  默认创建矩形文字框；圆角、圆形、背景和排版方向都在右侧属性检查器里调整。
+                </p>
                 <div className="flex flex-wrap items-center gap-2">
                   <button className={dangerButtonClass} disabled={!selection} onClick={() => deleteSelection()}>
-                    删除选中对象
+                    删除选中内容
                   </button>
                 </div>
               </section>

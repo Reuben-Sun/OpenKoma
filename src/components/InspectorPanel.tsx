@@ -1,6 +1,6 @@
 import { ChangeEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Bubble, CropConfig, Panel, PanelShape } from "../types";
+import { Bubble, BubbleDirection, BubbleType, CropConfig, Panel, PanelShape } from "../types";
 import {
   getPanelImageClipBounds,
   getPanelImageClipPoints,
@@ -39,6 +39,8 @@ const colorInputClass = "h-9 w-20 cursor-pointer rounded-lg border border-[var(-
 const cropOverlaySvgClass = "absolute inset-0 block h-full w-full overflow-visible";
 const cropHandleClass =
   "absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-100 bg-cyan-400 shadow-[0_0_0_1px_rgba(34,211,238,0.35)]";
+const TRANSPARENT_BUBBLE_BACKGROUND = "rgba(255,255,255,0)";
+const WHITE_BUBBLE_BACKGROUND = "#ffffff";
 
 type CropDragState =
   | {
@@ -390,6 +392,20 @@ function TextField({ label, value, onChange }: { label: string; value: string; o
       <input className={inputClass} value={value} onChange={(event) => onChange(event.target.value)} />
     </label>
   );
+}
+
+function getToggleButtonClass(active: boolean) {
+  return `${buttonClass} ${active ? "studio-btn-primary" : ""}`;
+}
+
+function isTransparentBubbleBackground(value: string) {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "transparent" || normalized === TRANSPARENT_BUBBLE_BACKGROUND;
+}
+
+function isWhiteBubbleBackground(value: string) {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "#ffffff" || normalized === "#fff" || normalized === "white" || normalized === "rgb(255,255,255)";
 }
 
 function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean; onClose: () => void }) {
@@ -897,83 +913,113 @@ function PanelInspector({ panel }: { panel: Panel }) {
 function BubbleInspector({ bubble }: { bubble: Bubble }) {
   const updateBubble = useEditorStore((state) => state.updateBubble);
 
-  const patch = (key: keyof Bubble) => (value: string | number) => {
-    updateBubble(bubble.id, {
-      [key]: value
-    } as Partial<Bubble>);
+  const patch = (next: Partial<Bubble>) => {
+    updateBubble(bubble.id, next);
   };
 
   return (
     <div className="space-y-3">
       <div className={sectionClass}>
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-[var(--text-primary)]">气泡属性</h3>
-          <span className="studio-chip px-2.5 py-1 text-[11px]">Bubble</span>
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">文字属性</h3>
+          <span className="studio-chip px-2.5 py-1 text-[11px]">Text</span>
         </div>
-        <label className={fieldClass}>
-          <span className={labelClass}>Type</span>
-          <select
-            className={`${selectClass} max-w-40`}
-            value={bubble.type}
-            onChange={(event) => patch("type")(event.target.value)}
-          >
-            <option value="rect">Rect</option>
-            <option value="rounded">Rounded</option>
-            <option value="circle">Circle</option>
-          </select>
-        </label>
+        <p className="text-xs leading-5 text-[var(--text-secondary)]">点击画布上的文字框后，可以在这里切换形状、背景、边框和排版方向。</p>
+      </div>
 
-        <label className={fieldClass}>
-          <span className={labelClass}>Direction</span>
-          <select
-            className={`${selectClass} max-w-40`}
-            value={bubble.direction}
-            onChange={(event) => patch("direction")(event.target.value)}
-          >
-            <option value="horizontal">horizontal</option>
-            <option value="vertical">vertical</option>
-          </select>
-        </label>
-
-        <NumberField label="X" value={bubble.x} onChange={patch("x") as (v: number) => void} />
-        <NumberField label="Y" value={bubble.y} onChange={patch("y") as (v: number) => void} />
-        <NumberField label="Width" value={bubble.width} min={30} onChange={patch("width") as (v: number) => void} />
-        <NumberField label="Height" value={bubble.height} min={30} onChange={patch("height") as (v: number) => void} />
-        <NumberField label="Font Size" value={bubble.fontSize} min={8} onChange={patch("fontSize") as (v: number) => void} />
-
-        <TextField label="Font Family" value={bubble.fontFamily} onChange={patch("fontFamily") as (v: string) => void} />
-
-        <label className={fieldClass}>
-          <span className={labelClass}>Background</span>
-          <input
-            className={colorInputClass}
-            type="color"
-            value={bubble.background}
-            onChange={(event) => patch("background")(event.target.value)}
-          />
-        </label>
-
-        <label className={fieldClass}>
-          <span className={labelClass}>Border</span>
-          <input
-            className={colorInputClass}
-            type="color"
-            value={bubble.borderColor}
-            onChange={(event) => patch("borderColor")(event.target.value)}
+      <div className={sectionClass}>
+        <label className="space-y-1">
+          <span className={labelClass}>内容</span>
+          <textarea
+            rows={6}
+            className={textareaClass}
+            value={bubble.text}
+            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => patch({ text: event.target.value })}
           />
         </label>
       </div>
 
       <div className={sectionClass}>
-        <label className="space-y-1">
-          <span className={labelClass}>Text</span>
-          <textarea
-            rows={6}
-            className={textareaClass}
-            value={bubble.text}
-            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => patch("text")(event.target.value)}
+        <div className="space-y-1">
+          <span className={labelClass}>形状</span>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { value: "rect", label: "矩形" },
+              { value: "rounded", label: "圆角" },
+              { value: "circle", label: "圆形" }
+            ].map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={getToggleButtonClass(bubble.type === option.value)}
+                onClick={() => patch({ type: option.value as BubbleType })}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <span className={labelClass}>背景</span>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              className={getToggleButtonClass(isTransparentBubbleBackground(bubble.background))}
+              onClick={() => patch({ background: TRANSPARENT_BUBBLE_BACKGROUND })}
+            >
+              透明
+            </button>
+            <button
+              type="button"
+              className={getToggleButtonClass(isWhiteBubbleBackground(bubble.background))}
+              onClick={() => patch({ background: WHITE_BUBBLE_BACKGROUND })}
+            >
+              纯白
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <span className={labelClass}>排版方向</span>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { value: "horizontal", label: "横排" },
+              { value: "vertical", label: "竖排" }
+            ].map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={getToggleButtonClass(bubble.direction === option.value)}
+                onClick={() => patch({ direction: option.value as BubbleDirection })}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <NumberField label="字体大小" value={bubble.fontSize} min={8} onChange={(value) => patch({ fontSize: value })} />
+        <TextField label="字体" value={bubble.fontFamily} onChange={(value) => patch({ fontFamily: value })} />
+      </div>
+
+      <div className={sectionClass}>
+        <NumberField label="边框粗细" value={bubble.borderWidth} min={0} onChange={(value) => patch({ borderWidth: value })} />
+
+        <label className={fieldClass}>
+          <span className={labelClass}>边框颜色</span>
+          <input
+            className={colorInputClass}
+            type="color"
+            value={bubble.borderColor}
+            onChange={(event) => patch({ borderColor: event.target.value })}
           />
         </label>
+
+        <NumberField label="X" value={bubble.x} onChange={(value) => patch({ x: value })} />
+        <NumberField label="Y" value={bubble.y} onChange={(value) => patch({ y: value })} />
+        <NumberField label="宽度" value={bubble.width} min={30} onChange={(value) => patch({ width: value })} />
+        <NumberField label="高度" value={bubble.height} min={30} onChange={(value) => patch({ height: value })} />
       </div>
     </div>
   );
@@ -997,7 +1043,7 @@ export default function InspectorPanel() {
 
       {!selection && (
         <p className="studio-subtle rounded-xl px-3 py-2 text-sm text-[var(--text-secondary)]">
-          请选择一个分镜或气泡进行编辑。
+          请选择一个分镜或文字框进行编辑。
         </p>
       )}
 
