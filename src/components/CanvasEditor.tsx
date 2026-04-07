@@ -70,10 +70,11 @@ function waitForStageRefresh(): Promise<void> {
   });
 }
 
-const SKEW_HANDLE_RADIUS = 10;
-const SKEW_HANDLE_HIT_STROKE_WIDTH = 24;
-const EDGE_HANDLE_SIZE = 14;
-const EDGE_HANDLE_HIT_STROKE_WIDTH = 24;
+const SKEW_HANDLE_RADIUS = 30;
+const SKEW_HANDLE_HIT_STROKE_WIDTH = 42;
+const EDGE_HANDLE_SIZE = 42;
+const EDGE_HANDLE_HIT_STROKE_WIDTH = 42;
+const EDGE_HANDLE_CORNER_RADIUS = 8;
 const SKEW_HANDLE_COLOR = "#2563eb";
 const SKEW_GUIDE_COLOR = "rgba(37, 99, 235, 0.35)";
 
@@ -230,7 +231,7 @@ function PanelSkewHandles({
             y={handlePoint.y - EDGE_HANDLE_SIZE / 2}
             width={EDGE_HANDLE_SIZE}
             height={EDGE_HANDLE_SIZE}
-            cornerRadius={3}
+            cornerRadius={EDGE_HANDLE_CORNER_RADIUS}
             hitStrokeWidth={EDGE_HANDLE_HIT_STROKE_WIDTH}
             fill="#eff6ff"
             stroke={SKEW_HANDLE_COLOR}
