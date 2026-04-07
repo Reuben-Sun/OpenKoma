@@ -20,6 +20,8 @@ export type PanelImage = {
   crop?: CropConfig;
   naturalWidth?: number;
   naturalHeight?: number;
+  mimeType?: string;
+  preserveTransparency?: boolean;
 };
 
 export type PanelShape = {

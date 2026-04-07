@@ -1,6 +1,7 @@
-import { ChangeEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, ChangeEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Bubble, BubbleDirection, BubbleType, CropConfig, Panel, PanelShape } from "../types";
+import { shouldPreserveImageTransparency } from "../lib/imageFormat";
 import {
   getPanelImageClipBounds,
   getPanelImageClipPoints,
@@ -41,6 +42,13 @@ const cropHandleClass =
   "absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-100 bg-cyan-400 shadow-[0_0_0_1px_rgba(34,211,238,0.35)]";
 const TRANSPARENT_BUBBLE_BACKGROUND = "rgba(255,255,255,0)";
 const WHITE_BUBBLE_BACKGROUND = "#ffffff";
+const TRANSPARENCY_GRID_STYLE = {
+  backgroundColor: "#ffffff",
+  backgroundImage:
+    "linear-gradient(45deg, rgba(148,163,184,0.18) 25%, transparent 25%), linear-gradient(-45deg, rgba(148,163,184,0.18) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, rgba(148,163,184,0.18) 75%), linear-gradient(-45deg, transparent 75%, rgba(148,163,184,0.18) 75%)",
+  backgroundPosition: "0 0, 0 10px, 10px -10px, -10px 0",
+  backgroundSize: "20px 20px"
+} satisfies CSSProperties;
 
 type CropDragState =
   | {
@@ -438,6 +446,7 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
     [frameRatio, naturalHeight, naturalWidth, visibleCropZoom]
   );
   const cropEdges = useMemo(() => buildCropEdges(cropShapePreview.normalizedPoints), [cropShapePreview.normalizedPoints]);
+  const imagePreservesTransparency = shouldPreserveImageTransparency(panel.image);
 
   const [draft, setDraft] = useState<CropDraft>(initialCrop);
   const [dragState, setDragState] = useState<CropDragState | null>(null);
@@ -583,7 +592,11 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
 
         <div
           className="relative mx-auto mt-4 overflow-hidden rounded-xl border border-[var(--line-soft)] bg-slate-950 shadow-[0_16px_46px_rgba(2,6,23,0.55)]"
-          style={{ width: displayWidth, height: displayHeight }}
+          style={{
+            width: displayWidth,
+            height: displayHeight,
+            ...(imagePreservesTransparency ? TRANSPARENCY_GRID_STYLE : {})
+          }}
         >
           <img
             src={panel.image.original}
@@ -722,6 +735,7 @@ function PanelInspector({ panel }: { panel: Panel }) {
   const panelShape = normalizePanelShape(panel.shape, panel.width);
   const isUploading = uploadingPanelId === panel.id;
   const isImageBusy = isUploading;
+  const imagePreservesTransparency = shouldPreserveImageTransparency(panel.image);
 
   useEffect(() => {
     setCropModalOpen(false);
@@ -896,6 +910,9 @@ function PanelInspector({ panel }: { panel: Panel }) {
             <p className="text-xs text-[var(--text-secondary)]">
               当前图像尺寸: {panel.image.naturalWidth ?? "?"} x {panel.image.naturalHeight ?? "?"}
             </p>
+            {imagePreservesTransparency ? (
+              <p className="text-xs text-[var(--text-secondary)]">已保留透明通道；PNG / WebP / GIF / SVG / AVIF 的半透明像素会按原样显示。</p>
+            ) : null}
             <p className="text-xs text-[var(--text-secondary)]">OpenKoma 现在是纯本地编辑器，这里只支持导入本地图片并进行非破坏裁剪。</p>
           </div>
         ) : (

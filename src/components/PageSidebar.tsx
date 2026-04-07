@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Ellipse, Group, Image as KonvaImage, Layer, Rect, Shape, Stage, Text } from "react-konva";
 import useImage from "use-image";
 import { Bubble, Panel, ProjectPage } from "../types";
+import { shouldPreserveImageTransparency } from "../lib/imageFormat";
 import { getPanelRenderTransform } from "../lib/panelGeometry";
 import { drawPanelPath, getPanelImageLayout } from "../lib/panelRender";
 import { useEditorStore } from "../lib/store";
@@ -11,6 +12,10 @@ const buttonClass =
 const dangerButtonClass = `${buttonClass} studio-btn-danger`;
 
 function PreviewPanelFill({ panel }: { panel: Panel }) {
+  if (shouldPreserveImageTransparency(panel.image)) {
+    return null;
+  }
+
   return (
     <Shape
       sceneFunc={(context, shape) => {

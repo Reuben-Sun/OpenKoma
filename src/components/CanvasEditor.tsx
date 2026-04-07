@@ -3,6 +3,7 @@ import Konva from "konva";
 import { Circle, Ellipse, Group, Image as KonvaImage, Layer, Line, Rect, Shape, Stage, Text, Transformer } from "react-konva";
 import useImage from "use-image";
 import { Bubble, Panel } from "../types";
+import { shouldPreserveImageTransparency } from "../lib/imageFormat";
 import {
   PANEL_EDGE_HANDLE_KEYS,
   PANEL_SHAPE_HANDLE_KEYS,
@@ -93,6 +94,10 @@ const SKEW_GUIDE_COLOR = "rgba(37, 99, 235, 0.35)";
 const TRANSFORMER_ANCHOR_SIZE = 18;
 
 function PanelFillShape({ panel }: { panel: Panel }) {
+  if (shouldPreserveImageTransparency(panel.image)) {
+    return null;
+  }
+
   return (
     <Shape
       sceneFunc={(context, shape) => {

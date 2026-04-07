@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { v4 as uuidv4 } from "uuid";
 import { applyPatch, compare, type Operation } from "fast-json-patch";
 import { uploadLocalImage } from "./api";
+import { shouldPreserveImageTransparency } from "./imageFormat";
 import {
   clamp,
   createBubble as createBubbleFactory,
@@ -1181,6 +1182,8 @@ function sanitizePanelImage(image: Panel["image"]): Panel["image"] {
     original: image.original.trim(),
     naturalWidth: Number.isFinite(naturalWidth) && naturalWidth > 0 ? Math.round(naturalWidth) : undefined,
     naturalHeight: Number.isFinite(naturalHeight) && naturalHeight > 0 ? Math.round(naturalHeight) : undefined,
+    mimeType: typeof image.mimeType === "string" && image.mimeType.trim() ? image.mimeType.trim() : undefined,
+    preserveTransparency: shouldPreserveImageTransparency(image),
     crop:
       crop &&
       Number.isFinite(crop.x) &&
@@ -2381,6 +2384,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
             original: result.url,
             naturalWidth: result.naturalWidth,
             naturalHeight: result.naturalHeight,
+            mimeType: result.mimeType,
+            preserveTransparency: result.preserveTransparency,
             crop: undefined
           }
         }));
