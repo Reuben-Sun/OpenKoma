@@ -4,13 +4,18 @@ import { Circle, Ellipse, Group, Image as KonvaImage, Layer, Line, Rect, Shape, 
 import useImage from "use-image";
 import { Bubble, Panel, PanelShape } from "../types";
 import {
+  PANEL_EDGE_HANDLE_KEYS,
   PANEL_SHAPE_HANDLE_KEYS,
+  PanelEdgeKey,
   PanelShapeKey,
+  Point,
+  getPanelEdgeHandlePoint,
   getPanelRenderTransform,
   getPanelShapeGuideLines,
   getPanelShapeHandlePoint,
   normalizePanelRotation,
   normalizePanelShape,
+  updatePanelEdgeHandle,
   updatePanelShapeHandle
 } from "../lib/panelGeometry";
 import { drawPanelPath, getPanelImageLayout } from "../lib/panelRender";
@@ -67,6 +72,8 @@ function waitForStageRefresh(): Promise<void> {
 
 const SKEW_HANDLE_RADIUS = 10;
 const SKEW_HANDLE_HIT_STROKE_WIDTH = 24;
+const EDGE_HANDLE_SIZE = 14;
+const EDGE_HANDLE_HIT_STROKE_WIDTH = 24;
 const SKEW_HANDLE_COLOR = "#2563eb";
 const SKEW_GUIDE_COLOR = "rgba(37, 99, 235, 0.35)";
 
@@ -158,6 +165,16 @@ function PanelSkewHandles({
   const transform = getPanelRenderTransform(panel);
   const guideLines = getPanelShapeGuideLines(panel);
 
+  const getLocalPointer = (node: Konva.Node): Point | null => {
+    const parent = node.getParent();
+    const stage = node.getStage();
+    const pointer = stage?.getPointerPosition();
+    if (!parent || !pointer) {
+      return null;
+    }
+    return parent.getAbsoluteTransform().copy().invert().point(pointer);
+  };
+
   const createBoundFunc =
     (key: PanelShapeKey) =>
     function dragBoundFunc(this: Konva.Node, position: Konva.Vector2d) {
@@ -174,6 +191,22 @@ function PanelSkewHandles({
       return parent.getAbsoluteTransform().point(nextLocalPoint);
     };
 
+  const createEdgeBoundFunc =
+    (key: PanelEdgeKey) =>
+    function dragBoundFunc(this: Konva.Node, position: Konva.Vector2d) {
+      const parent = this.getParent();
+      if (!parent) {
+        return position;
+      }
+
+      const inverse = parent.getAbsoluteTransform().copy().invert();
+      const localPoint = inverse.point(position);
+      const nextShape = updatePanelEdgeHandle(shape, key, panel.width, panel.height, localPoint);
+      const nextLocalPoint = getPanelEdgeHandlePoint({ width: panel.width, height: panel.height, shape: nextShape }, key);
+
+      return parent.getAbsoluteTransform().point(nextLocalPoint);
+    };
+
   return (
     <Group
       name="panel-skew-overlay"
@@ -185,6 +218,50 @@ function PanelSkewHandles({
     >
       <Line points={guideLines.top} stroke={SKEW_GUIDE_COLOR} strokeWidth={2} dash={[8, 5]} listening={false} />
       <Line points={guideLines.bottom} stroke={SKEW_GUIDE_COLOR} strokeWidth={2} dash={[8, 5]} listening={false} />
+
+      {PANEL_EDGE_HANDLE_KEYS.map((key) => {
+        const handlePoint = getPanelEdgeHandlePoint(panel, key);
+
+        return (
+          <Rect
+            key={key}
+            name="panel-skew-handle panel-edge-handle"
+            x={handlePoint.x - EDGE_HANDLE_SIZE / 2}
+            y={handlePoint.y - EDGE_HANDLE_SIZE / 2}
+            width={EDGE_HANDLE_SIZE}
+            height={EDGE_HANDLE_SIZE}
+            cornerRadius={3}
+            hitStrokeWidth={EDGE_HANDLE_HIT_STROKE_WIDTH}
+            fill="#eff6ff"
+            stroke={SKEW_HANDLE_COLOR}
+            strokeWidth={2}
+            draggable
+            dragBoundFunc={createEdgeBoundFunc(key)}
+            onMouseDown={(event) => {
+              event.cancelBubble = true;
+            }}
+            onTouchStart={(event) => {
+              event.cancelBubble = true;
+            }}
+            onDragMove={(event) => {
+              event.cancelBubble = true;
+              const localPointer = getLocalPointer(event.target);
+              if (!localPointer) {
+                return;
+              }
+              onDraftChange(updatePanelEdgeHandle(shape, key, panel.width, panel.height, localPointer));
+            }}
+            onDragEnd={(event) => {
+              event.cancelBubble = true;
+              const localPointer = getLocalPointer(event.target);
+              if (!localPointer) {
+                return;
+              }
+              onCommit(updatePanelEdgeHandle(shape, key, panel.width, panel.height, localPointer));
+            }}
+          />
+        );
+      })}
 
       {PANEL_SHAPE_HANDLE_KEYS.map((key) => {
         const handlePoint = getPanelShapeHandlePoint(panel, key);

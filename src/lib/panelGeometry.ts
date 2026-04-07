@@ -5,11 +5,13 @@ export type Point = {
   y: number;
 };
 export type PanelShapeKey = keyof PanelShape;
+export type PanelEdgeKey = "top" | "right" | "bottom" | "left";
 
 const MIN_PANEL_EDGE_WIDTH = 24;
 export const PANEL_SHAPE_MIN_RATIO = -1;
 export const PANEL_SHAPE_MAX_RATIO = 2;
 export const PANEL_SHAPE_HANDLE_KEYS: PanelShapeKey[] = ["topLeft", "topRight", "bottomRight", "bottomLeft"];
+export const PANEL_EDGE_HANDLE_KEYS: PanelEdgeKey[] = ["top", "right", "bottom", "left"];
 
 export const RECT_PANEL_SHAPE: PanelShape = {
   topLeft: 0,
@@ -136,6 +138,39 @@ export function getPanelShapeGuideLines(panel: Pick<Panel, "width" | "height" | 
   };
 }
 
+export function getPanelEdgeHandlePoint(
+  panel: Pick<Panel, "width" | "height" | "shape">,
+  key: PanelEdgeKey
+): Point {
+  const [topLeft, topRight, bottomRight, bottomLeft] = getPanelLocalPoints(panel);
+
+  if (key === "top") {
+    return {
+      x: (topLeft.x + topRight.x) / 2,
+      y: (topLeft.y + topRight.y) / 2
+    };
+  }
+
+  if (key === "right") {
+    return {
+      x: (topRight.x + bottomRight.x) / 2,
+      y: (topRight.y + bottomRight.y) / 2
+    };
+  }
+
+  if (key === "bottom") {
+    return {
+      x: (bottomLeft.x + bottomRight.x) / 2,
+      y: (bottomLeft.y + bottomRight.y) / 2
+    };
+  }
+
+  return {
+    x: (topLeft.x + bottomLeft.x) / 2,
+    y: (topLeft.y + bottomLeft.y) / 2
+  };
+}
+
 export function clampPanelShapeHandleX(
   shape: PanelShape,
   key: PanelShapeKey,
@@ -168,6 +203,91 @@ export function updatePanelShapeHandle(shape: PanelShape, key: PanelShapeKey, wi
     },
     width
   );
+}
+
+function getPanelEdgeTranslationBounds(pointA: number, pointB: number, width: number) {
+  const minX = width * PANEL_SHAPE_MIN_RATIO;
+  const maxX = width * PANEL_SHAPE_MAX_RATIO;
+  return {
+    minShift: minX - Math.min(pointA, pointB),
+    maxShift: maxX - Math.max(pointA, pointB)
+  };
+}
+
+function shiftPanelVerticalEdge(shape: PanelShape, key: "left" | "right", width: number, nextCenterX: number): PanelShape {
+  if (key === "left") {
+    const currentTop = shape.topLeft * width;
+    const currentBottom = shape.bottomLeft * width;
+    const currentCenter = (currentTop + currentBottom) / 2;
+    const bounds = getPanelEdgeTranslationBounds(currentTop, currentBottom, width);
+    const shift = clamp(nextCenterX - currentCenter, bounds.minShift, bounds.maxShift);
+    return normalizePanelShape(
+      {
+        ...shape,
+        topLeft: (currentTop + shift) / Math.max(1, width),
+        bottomLeft: (currentBottom + shift) / Math.max(1, width)
+      },
+      width
+    );
+  }
+
+  const currentTop = shape.topRight * width;
+  const currentBottom = shape.bottomRight * width;
+  const currentCenter = (currentTop + currentBottom) / 2;
+  const bounds = getPanelEdgeTranslationBounds(currentTop, currentBottom, width);
+  const shift = clamp(nextCenterX - currentCenter, bounds.minShift, bounds.maxShift);
+  return normalizePanelShape(
+    {
+      ...shape,
+      topRight: (currentTop + shift) / Math.max(1, width),
+      bottomRight: (currentBottom + shift) / Math.max(1, width)
+    },
+    width
+  );
+}
+
+function resizePanelHorizontalEdge(shape: PanelShape, key: "top" | "bottom", width: number, nextY: number, height: number): PanelShape {
+  const minSpan = width * Math.min(0.96, MIN_PANEL_EDGE_WIDTH / Math.max(24, width));
+  const minX = width * PANEL_SHAPE_MIN_RATIO;
+  const maxX = width * PANEL_SHAPE_MAX_RATIO;
+  const currentLeft = (key === "top" ? shape.topLeft : shape.bottomLeft) * width;
+  const currentRight = (key === "top" ? shape.topRight : shape.bottomRight) * width;
+  const inwardPixels = key === "top" ? nextY : height - nextY;
+  const perSideDelta = inwardPixels / 2;
+  const minDelta = Math.max(minX - currentLeft, currentRight - maxX);
+  const maxDelta = Math.min(maxX - currentLeft, currentRight - minX, (currentRight - currentLeft - minSpan) / 2);
+  const clampedDelta = clamp(perSideDelta, minDelta, maxDelta);
+  const nextLeft = currentLeft + clampedDelta;
+  const nextRight = currentRight - clampedDelta;
+
+  return normalizePanelShape(
+    key === "top"
+      ? {
+          ...shape,
+          topLeft: nextLeft / Math.max(1, width),
+          topRight: nextRight / Math.max(1, width)
+        }
+      : {
+          ...shape,
+          bottomLeft: nextLeft / Math.max(1, width),
+          bottomRight: nextRight / Math.max(1, width)
+        },
+    width
+  );
+}
+
+export function updatePanelEdgeHandle(
+  shape: PanelShape,
+  key: PanelEdgeKey,
+  width: number,
+  height: number,
+  point: Point
+): PanelShape {
+  if (key === "top" || key === "bottom") {
+    return resizePanelHorizontalEdge(shape, key, width, point.y, height);
+  }
+
+  return shiftPanelVerticalEdge(shape, key, width, point.x);
 }
 
 export function getInsetPanelLocalPoints(
