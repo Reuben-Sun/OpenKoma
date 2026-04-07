@@ -419,6 +419,28 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
   const liveSnapEnabled =
     snapSizeTo16 &&
     (selection?.kind !== "panel" || !selectedPanel || Math.abs(normalizePanelRotation(selectedPanel.rotation)) < 0.001);
+  const styleTransformerAnchor = (anchor: Konva.Rect) => {
+    if (selection?.kind !== "panel") {
+      return;
+    }
+
+    if (!anchor.hasName("rotater")) {
+      anchor.visible(false);
+      anchor.listening(false);
+      anchor.width(0);
+      anchor.height(0);
+      return;
+    }
+
+    anchor.visible(true);
+    anchor.listening(true);
+    anchor.width(TRANSFORMER_ANCHOR_SIZE);
+    anchor.height(TRANSFORMER_ANCHOR_SIZE);
+    anchor.cornerRadius(TRANSFORMER_ANCHOR_SIZE / 2);
+    anchor.fill("#eff6ff");
+    anchor.stroke(SKEW_HANDLE_COLOR);
+    anchor.strokeWidth(2);
+  };
 
   useEffect(() => {
     if (!selection || selection.kind !== "panel") {
@@ -450,6 +472,29 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
     transformerRef.current.nodes([node]);
     transformerRef.current.getLayer()?.batchDraw();
   }, [selectedNodeId, activePage.id, activePage.panels, activePage.bubbles]);
+
+  useEffect(() => {
+    const transformer = transformerRef.current;
+    if (!transformer || selection?.kind !== "panel") {
+      return;
+    }
+
+    DEFAULT_TRANSFORMER_ANCHORS.forEach((anchorName) => {
+      const anchor = transformer.findOne<Konva.Rect>(`.${anchorName}`);
+      if (!anchor) {
+        return;
+      }
+
+      anchor.setAttrs({
+        visible: false,
+        listening: false,
+        width: 0,
+        height: 0
+      });
+    });
+
+    transformer.getLayer()?.batchDraw();
+  }, [selection?.kind, selectedNodeId, activePage.id, activePage.panels, activePage.bubbles]);
 
   const captureStageDataUrl = (exportWidth: number, exportHeight: number) => {
     const stage = stageRef.current;
@@ -852,6 +897,8 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
                 enabledAnchors={selection?.kind === "bubble" ? DEFAULT_TRANSFORMER_ANCHORS : []}
                 anchorSize={TRANSFORMER_ANCHOR_SIZE}
                 keepRatio={false}
+                anchorStyleFunc={styleTransformerAnchor}
+                borderEnabled={selection?.kind === "bubble"}
                 borderStroke="#2563eb"
                 anchorStroke="#2563eb"
                 anchorFill="#bfdbfe"
