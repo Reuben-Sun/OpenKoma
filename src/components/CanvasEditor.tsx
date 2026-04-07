@@ -34,17 +34,16 @@ export type CanvasEditorHandle = {
 };
 
 const ROTATION_SNAP_ANGLES = Array.from({ length: 72 }, (_value, index) => index * 5);
-const PANEL_TRANSFORMER_ANCHORS: string[] = ["top-right", "bottom-right", "bottom-left"];
 const DEFAULT_TRANSFORMER_ANCHORS: string[] = [
+  "top-left",
   "top-center",
   "top-right",
-  "middle-right",
   "middle-left",
+  "middle-right",
   "bottom-left",
   "bottom-center",
   "bottom-right"
 ];
-const CORNER_TRANSFORMER_ANCHORS = new Set(["top-right", "bottom-right", "bottom-left"]);
 
 function formatFilename(projectName: string, ext: "png" | "pdf") {
   const safe = projectName.trim().replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, "_") || "openkoma";
@@ -89,19 +88,6 @@ const EDGE_HANDLE_CORNER_RADIUS = 8;
 const SKEW_HANDLE_COLOR = "#2563eb";
 const SKEW_GUIDE_COLOR = "rgba(37, 99, 235, 0.35)";
 const TRANSFORMER_ANCHOR_SIZE = 18;
-
-function isCornerTransformerAnchor(anchor: string | null): boolean {
-  return Boolean(anchor && CORNER_TRANSFORMER_ANCHORS.has(anchor));
-}
-
-function styleTransformerAnchor(anchor: Konva.Rect) {
-  if (anchor.hasName("top-left")) {
-    anchor.visible(false);
-    anchor.listening(false);
-    anchor.width(0);
-    anchor.height(0);
-  }
-}
 
 function PanelFillShape({ panel }: { panel: Panel }) {
   return (
@@ -399,7 +385,6 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
 
   const stageRef = useRef<Konva.Stage | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
-  const shiftPressedRef = useRef(false);
   const [zoom, setZoom] = useState(0.27);
 
   const [draftRect, setDraftRect] = useState<DraftRect | null>(null);
@@ -429,28 +414,6 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
   const liveSnapEnabled =
     snapSizeTo16 &&
     (selection?.kind !== "panel" || !selectedPanel || Math.abs(normalizePanelRotation(selectedPanel.rotation)) < 0.001);
-  const enabledTransformerAnchors = selection?.kind === "panel" ? PANEL_TRANSFORMER_ANCHORS : DEFAULT_TRANSFORMER_ANCHORS;
-  const hideTopLeftTransformerAnchor = () => {
-    const anchor = transformerRef.current?.findOne<Konva.Rect>(".top-left");
-    if (!anchor) {
-      return;
-    }
-
-    anchor.visible(false);
-    anchor.listening(false);
-    anchor.width(0);
-    anchor.height(0);
-  };
-  const syncTransformerKeepRatio = () => {
-    const transformer = transformerRef.current;
-    if (!transformer) {
-      return;
-    }
-
-    transformer.keepRatio(shiftPressedRef.current && isCornerTransformerAnchor(transformer.getActiveAnchor()));
-    hideTopLeftTransformerAnchor();
-    transformer.getLayer()?.batchDraw();
-  };
 
   useEffect(() => {
     if (!selection || selection.kind !== "panel") {
@@ -480,45 +443,8 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
     }
 
     transformerRef.current.nodes([node]);
-    syncTransformerKeepRatio();
-    hideTopLeftTransformerAnchor();
     transformerRef.current.getLayer()?.batchDraw();
   }, [selectedNodeId, activePage.id, activePage.panels, activePage.bubbles]);
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Shift") {
-        return;
-      }
-
-      shiftPressedRef.current = true;
-      syncTransformerKeepRatio();
-    };
-
-    const handleKeyUp = (event: KeyboardEvent) => {
-      if (event.key !== "Shift") {
-        return;
-      }
-
-      shiftPressedRef.current = false;
-      syncTransformerKeepRatio();
-    };
-
-    const handleWindowBlur = () => {
-      shiftPressedRef.current = false;
-      syncTransformerKeepRatio();
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-    window.addEventListener("blur", handleWindowBlur);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-      window.removeEventListener("blur", handleWindowBlur);
-    };
-  }, []);
 
   const captureStageDataUrl = (exportWidth: number, exportHeight: number) => {
     const stage = stageRef.current;
@@ -911,30 +837,21 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
                 ref={transformerRef}
                 name="selection-transformer"
                 rotateEnabled={selection?.kind === "panel"}
+                resizeEnabled={selection?.kind === "bubble"}
                 flipEnabled={false}
-                enabledAnchors={enabledTransformerAnchors}
+                enabledAnchors={DEFAULT_TRANSFORMER_ANCHORS}
                 anchorSize={TRANSFORMER_ANCHOR_SIZE}
                 keepRatio={false}
-                shiftBehavior="none"
-                anchorStyleFunc={styleTransformerAnchor}
                 borderStroke="#2563eb"
                 anchorStroke="#2563eb"
                 anchorFill="#bfdbfe"
                 rotateAnchorOffset={28}
                 rotationSnaps={selection?.kind === "panel" ? ROTATION_SNAP_ANGLES : undefined}
                 rotationSnapTolerance={2}
-                onTransformStart={syncTransformerKeepRatio}
-                onTransformEnd={() => {
-                  syncTransformerKeepRatio();
-                }}
                 boundBoxFunc={(oldBox, newBox) => {
                   const minSize = selection?.kind === "bubble" ? 30 : 24;
                   if (newBox.width < minSize || newBox.height < minSize) {
                     return oldBox;
-                  }
-
-                  if (shiftPressedRef.current && isCornerTransformerAnchor(transformerRef.current?.getActiveAnchor() ?? null)) {
-                    return newBox;
                   }
 
                   if (liveSnapEnabled) {
