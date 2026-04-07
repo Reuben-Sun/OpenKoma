@@ -42,8 +42,6 @@ export type Panel = {
   borderRadius: number;
   gap: number;
   image?: PanelImage;
-  prompt?: string;
-  negativePrompt?: string;
   parentId?: string;
 };
 
@@ -81,11 +79,6 @@ export type Project = {
   activePageId: string;
 };
 
-export type AiServiceConfig = {
-  baseUrl: string;
-  authorization: string;
-};
-
 export type Selection =
   | {
       kind: "panel";
@@ -95,10 +88,3 @@ export type Selection =
       kind: "bubble";
       id: string;
     };
-
-export type GeneratePayload = {
-  prompt: string;
-  negativePrompt?: string;
-  width: number;
-  height: number;
-};

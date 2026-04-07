@@ -2,13 +2,13 @@
 
 <h1>OpenKoma</h1>
 
-<p><strong>Local-First AI Comic Editor</strong><br/>A production-focused open-source workflow for comic layout, non-destructive image editing, and reversible history.</p>
+<p><strong>Local-First Comic Layout Editor</strong><br/>A production-focused open-source workflow for comic layout, non-destructive image crop, and reversible history.</p>
 
 <p>
   <img alt="license" src="https://img.shields.io/badge/License-Apache%202.0-2ea44f?style=for-the-badge" />
   <img alt="frontend" src="https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-61dafb?style=for-the-badge" />
   <img alt="canvas" src="https://img.shields.io/badge/Canvas-Konva-0ea5e9?style=for-the-badge" />
-  <img alt="ai" src="https://img.shields.io/badge/AI-Browser%20to%20FastAPI-111827?style=for-the-badge" />
+  <img alt="workflow" src="https://img.shields.io/badge/Workflow-Local%20Only-111827?style=for-the-badge" />
   <img alt="state" src="https://img.shields.io/badge/State-Zustand-f59e0b?style=for-the-badge" />
 </p>
 
@@ -27,14 +27,14 @@
 </div>
 
 ## Abstract
-OpenKoma is a local-first comic creation environment designed for practical production instead of demo-only workflows. It combines panel composition, bubble editing, local image import with non-destructive crop, multi-page management, incremental undo/redo history, and direct integration with external AI image services.
+OpenKoma is a local-first comic creation environment designed for practical production instead of demo-only workflows. It combines panel composition, bubble editing, local image import with non-destructive crop, multi-page management, and incremental undo/redo history in a pure local editor.
 
 ## Why OpenKoma
-- Incremental reversible editing: every mutation records forward/backward JSON patches for robust undo/redo.
-- Non-destructive image workflow: original local assets are preserved while crop parameters drive rendering.
+- Incremental reversible editing: every mutation records forward/backward JSON patches for reliable undo/redo.
+- Non-destructive image workflow: original local assets stay intact while crop parameters drive rendering.
 - True skewed panels: panels support parallelogram and trapezoid shapes instead of simple rotated rectangles.
 - Multi-page production flow: page list with add/delete/reorder, plus ordered multi-page PDF export.
-- Browser-direct AI services: configure one external FastAPI service URL for generation, background removal, upscaling, and health checks without a built-in backend server.
+- Pure local workflow: no external service configuration, no backend dependency, and only local image import.
 - Local-first persistence: save directly to a picked folder when File System Access is available, or export/import a single `.openkoma.json` file as fallback.
 
 ## Feature Highlights
@@ -49,8 +49,7 @@ OpenKoma is a local-first comic creation environment designed for practical prod
 - Image workflow
   - Local image import per panel
   - Manual crop editor that matches skewed panel shape
-  - Background removal and 2x upscaling via external AI endpoints
-  - Display without stretch (cover + clip behavior)
+  - Display without stretch (`cover` + clip behavior)
 - Multi-page and export
   - Left page list with live previews
   - PNG export for current page
@@ -74,19 +73,11 @@ npm run dev
 Default app URL:
 - Web: `http://localhost:5173`
 
-### Configure External AI
-After opening the app, go to the toolbar drawer `Service Config` and fill in:
-- service URL
-- optional `Authorization` header value
-
-OpenKoma will then call these fixed endpoints automatically:
-- `POST <baseUrl>/generate`
-- `POST <baseUrl>/remove-background`
-- `POST <baseUrl>/upscale`
-- `GET <baseUrl>/healthz`
-
-API contract for your FastAPI service:
-- `docs/fastapi-api.md`
+### Local Workflow
+- Import images from your computer in the panel inspector.
+- Edit crop non-destructively inside the manual crop modal.
+- Save to a folder or export/import a single `.openkoma.json` file.
+- No backend or external service setup is required.
 
 ### Build
 ```bash
@@ -96,7 +87,7 @@ npm run build
 ## Persistence
 - With File System Access API support, OpenKoma saves `project.json`, `history.log`, and image assets into the folder you choose.
 - Without it, OpenKoma falls back to downloading and loading a single `.openkoma.json` file with images embedded as data URLs when possible.
-- The AI service `Authorization` value stays in browser `localStorage` and is never written into exported project files.
+- Imported images remain local project assets; OpenKoma no longer provides external generation, background removal, or upscaling features.
 
 ## Keyboard Shortcuts
 - `Cmd/Ctrl + Z`: Undo
@@ -124,7 +115,7 @@ npm run build
 ## Citation
 ```bibtex
 @software{openkoma2026,
-  title = {OpenKoma: A Local-First AI Comic Editor with Incremental Reversible History},
+  title = {OpenKoma: A Local-First Comic Layout Editor with Incremental Reversible History},
   author = {OpenKoma Authors},
   year = {2026},
   url = {https://github.com/<your-org>/OpenKoma},

@@ -1,16 +1,7 @@
 import { create } from "zustand";
 import { v4 as uuidv4 } from "uuid";
 import { applyPatch, compare, type Operation } from "fast-json-patch";
-import {
-  createImagePayloadFromSource,
-  generateImage,
-  loadAiServiceConfig,
-  normalizeAiServiceConfig,
-  persistAiServiceConfig,
-  removeImageBackground,
-  upscaleImage,
-  uploadLocalImage
-} from "./api";
+import { uploadLocalImage } from "./api";
 import {
   clamp,
   createBubble as createBubbleFactory,
@@ -21,7 +12,7 @@ import {
   splitGridPanels
 } from "./project";
 import { getPanelCenter, getPanelImageClipBounds, normalizePanelRotation, normalizePanelShape, rotatePointAround } from "./panelGeometry";
-import { AiServiceConfig, Bubble, BubbleType, CanvasPreset, CropConfig, Panel, PanelShape, Project, ProjectPage, Selection } from "../types";
+import { Bubble, BubbleType, CanvasPreset, CropConfig, Panel, PanelShape, Project, ProjectPage, Selection } from "../types";
 
 type HistoryEntry = {
   forward: Operation[];
@@ -40,7 +31,6 @@ export type ThemeMode = "dark" | "light";
 
 type EditorStore = {
   project: Project;
-  aiServiceConfig: AiServiceConfig;
   projectDirectoryHandle?: FileSystemDirectoryHandle;
   projectDirectoryName?: string;
   assetRefMap: Record<string, string>;
@@ -53,10 +43,7 @@ type EditorStore = {
   historyFuture: HistoryEntry[];
   noticeHistory: NoticeEntry[];
   busy: {
-    generatingPanelId?: string;
     uploadingPanelId?: string;
-    removingBackgroundPanelId?: string;
-    upscalingPanelId?: string;
     loadingProject: boolean;
     savingProject: boolean;
   };
@@ -70,7 +57,6 @@ type EditorStore = {
   redo: () => void;
 
   setProjectName: (name: string) => void;
-  setAiServiceConfig: (patch: Partial<AiServiceConfig>) => void;
   setCanvasPreset: (preset: CanvasPreset) => void;
   setCanvasSize: (width: number, height: number) => void;
   setAllPanelsStyle: (style: { borderRadius?: number; borderWidth?: number }) => void;
@@ -100,9 +86,6 @@ type EditorStore = {
   setPanelCrop: (id: string, crop: CropConfig) => void;
   resetPanelCrop: (id: string) => void;
   uploadLocalImageForPanel: (id: string, file: File) => Promise<void>;
-  generateImageForPanel: (id: string) => Promise<void>;
-  removePanelBackground: (id: string) => Promise<void>;
-  upscalePanelImage: (id: string) => Promise<void>;
 
   saveProject: () => Promise<void>;
   saveProjectAs: () => Promise<void>;
@@ -196,7 +179,6 @@ const PROJECT_JSON_FILENAME = "project.json";
 const HISTORY_LOG_FILENAME = "history.log";
 const PROJECT_JSON_EXPORT_SUFFIX = ".openkoma.json";
 const THEME_STORAGE_KEY = "openkoma-theme-mode";
-const UPSCALE_FACTOR = 2;
 
 type ProjectDirectoryPickerWindow = Window & {
   showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle>;
@@ -599,6 +581,10 @@ async function resolveImageBlobForSave(
     }
   }
 
+  if (!(ref.startsWith("blob:") || ref.startsWith("data:"))) {
+    return null;
+  }
+
   try {
     const response = await fetch(ref);
     if (!response.ok) {
@@ -993,32 +979,6 @@ function appendTransientObjectUrl(urls: string[], url: string): string[] {
   return [...urls, url];
 }
 
-function scaleCropToImageSize(
-  crop: CropConfig | undefined,
-  previousNaturalWidth: number,
-  previousNaturalHeight: number,
-  nextNaturalWidth: number,
-  nextNaturalHeight: number
-): CropConfig | undefined {
-  if (!crop) {
-    return undefined;
-  }
-
-  const safePrevWidth = Math.max(1, previousNaturalWidth);
-  const safePrevHeight = Math.max(1, previousNaturalHeight);
-  const scaleX = nextNaturalWidth / safePrevWidth;
-  const scaleY = nextNaturalHeight / safePrevHeight;
-  const width = Math.max(1, Math.min(nextNaturalWidth, crop.width * scaleX));
-  const height = Math.max(1, Math.min(nextNaturalHeight, crop.height * scaleY));
-
-  return {
-    x: clamp(crop.x * scaleX, 0, Math.max(0, nextNaturalWidth - width)),
-    y: clamp(crop.y * scaleY, 0, Math.max(0, nextNaturalHeight - height)),
-    width,
-    height,
-    scale: clamp(crop.scale, 0.1, 4)
-  };
-}
 
 type MaterializedLoadResult = {
   project: Project;
@@ -1143,10 +1103,6 @@ function withHistory(
 }
 
 function describePanelPatch(patch: Partial<Panel>): string {
-  if ("prompt" in patch || "negativePrompt" in patch) {
-    return "已修改分镜提示词";
-  }
-
   if ("shape" in patch && !("x" in patch || "y" in patch || "width" in patch || "height" in patch || "rotation" in patch)) {
     return "已调整分镜斜切";
   }
@@ -1203,18 +1159,62 @@ function bubbleTypeLabel(type: BubbleType): string {
   return "圆形";
 }
 
-function sanitizePanel(panel: Panel): Panel {
-  const width = Math.max(24, panel.width);
+function isLocalImageRef(ref: string | undefined): ref is string {
+  const normalized = ref?.trim();
+  if (!normalized) {
+    return false;
+  }
+
+  return normalized.startsWith("blob:") || normalized.startsWith("data:") || normalizeProjectAssetRef(normalized) !== null;
+}
+
+function sanitizePanelImage(image: Panel["image"]): Panel["image"] {
+  if (!image || !isLocalImageRef(image.original)) {
+    return undefined;
+  }
+
+  const naturalWidth = Number(image.naturalWidth);
+  const naturalHeight = Number(image.naturalHeight);
+  const crop = image.crop;
+
   return {
-    ...panel,
-    width,
-    height: Math.max(24, panel.height),
-    rotation: normalizePanelRotation(panel.rotation),
-    shape: normalizePanelShape(panel.shape, width),
+    original: image.original.trim(),
+    naturalWidth: Number.isFinite(naturalWidth) && naturalWidth > 0 ? Math.round(naturalWidth) : undefined,
+    naturalHeight: Number.isFinite(naturalHeight) && naturalHeight > 0 ? Math.round(naturalHeight) : undefined,
+    crop:
+      crop &&
+      Number.isFinite(crop.x) &&
+      Number.isFinite(crop.y) &&
+      Number.isFinite(crop.width) &&
+      Number.isFinite(crop.height) &&
+      Number.isFinite(crop.scale)
+        ? {
+            x: crop.x,
+            y: crop.y,
+            width: crop.width,
+            height: crop.height,
+            scale: clamp(crop.scale, 0.1, 4)
+          }
+        : undefined
+  };
+}
+
+function sanitizePanel(panel: Panel): Panel {
+  return createPanel({
+    id: panel.id,
+    x: panel.x,
+    y: panel.y,
+    width: panel.width,
+    height: panel.height,
+    rotation: panel.rotation,
+    shape: panel.shape,
+    borderColor: panel.borderColor,
     borderRadius: Math.max(0, panel.borderRadius),
     borderWidth: Math.max(0, panel.borderWidth),
-    gap: Math.max(0, panel.gap)
-  };
+    gap: Math.max(0, panel.gap),
+    image: sanitizePanelImage(panel.image),
+    parentId: panel.parentId
+  });
 }
 
 function sanitizeCanvas(canvas: Partial<ProjectPage["canvas"]> | undefined): ProjectPage["canvas"] {
@@ -1271,14 +1271,14 @@ function normalizeLoadedProject(loaded: LegacyProject): Project {
   );
 
   if (fallbackPage.panels.length === 0) {
-    const defaultPanel = createPanel({
-      x: 40,
-      y: 40,
-      width: fallbackPage.canvas.width - 80,
-      height: fallbackPage.canvas.height - 80,
-      prompt: "漫画分镜，一个少年站在雨中，赛博朋克风格，高细节"
-    });
-    fallbackPage.panels = [defaultPanel];
+    fallbackPage.panels = [
+      createPanel({
+        x: 40,
+        y: 40,
+        width: fallbackPage.canvas.width - 80,
+        height: fallbackPage.canvas.height - 80
+      })
+    ];
   }
 
   return {
@@ -1647,7 +1647,6 @@ async function runSaveProjectFlow(
 
 export const useEditorStore = create<EditorStore>((set, get) => ({
   project: createEmptyProject(),
-  aiServiceConfig: loadAiServiceConfig(),
   projectDirectoryHandle: undefined,
   projectDirectoryName: undefined,
   assetRefMap: {},
@@ -1660,10 +1659,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   historyFuture: [],
   noticeHistory: [],
   busy: {
-    generatingPanelId: undefined,
     uploadingPanelId: undefined,
-    removingBackgroundPanelId: undefined,
-    upscalingPanelId: undefined,
     loadingProject: false,
     savingProject: false
   },
@@ -1763,24 +1759,6 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
       return {
         ...historyState
-      };
-    });
-  },
-
-  setAiServiceConfig: (patch) => {
-    set((state) => {
-      const nextConfig = normalizeAiServiceConfig({
-        ...state.aiServiceConfig,
-        ...patch
-      });
-
-      if (JSON.stringify(nextConfig) === JSON.stringify(state.aiServiceConfig)) {
-        return state;
-      }
-
-      persistAiServiceConfig(nextConfig);
-      return {
-        aiServiceConfig: nextConfig
       };
     });
   },
@@ -2047,9 +2025,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
             borderRadius: target.borderRadius,
             borderWidth: target.borderWidth,
             gap: target.gap,
-            parentId: target.id,
-            prompt: target.prompt,
-            negativePrompt: target.negativePrompt
+            parentId: target.id
           })
         );
       });
@@ -2425,227 +2401,6 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         busy: {
           ...state.busy,
           uploadingPanelId: undefined
-        }
-      }));
-    }
-  },
-
-  generateImageForPanel: async (id) => {
-    const panel = findPanel(get().project, id);
-    if (!panel) {
-      get().setNotice("找不到分镜");
-      return;
-    }
-
-    const prompt = panel.prompt?.trim();
-    if (!prompt) {
-      get().setNotice("请先输入 Prompt");
-      return;
-    }
-
-    set((state) => ({
-      busy: {
-        ...state.busy,
-        generatingPanelId: id
-      },
-      ...withNotice(state, "正在生成图像...")
-    }));
-
-    try {
-      const result = await generateImage(get().aiServiceConfig, {
-        prompt,
-        negativePrompt: panel.negativePrompt,
-        width: Math.max(64, Math.round(panel.width)),
-        height: Math.max(64, Math.round(panel.height))
-      });
-
-      set((state) => {
-        const nextProject = updateProjectPanelById(state.project, id, (entry) => ({
-          ...entry,
-          image: {
-            original: result.url,
-            naturalWidth: result.naturalWidth,
-            naturalHeight: result.naturalHeight,
-            crop: undefined
-          }
-        }));
-
-        if (!nextProject) {
-          revokeObjectUrls([result.url]);
-          return {
-            ...withNotice(state, "分镜已不存在")
-          };
-        }
-
-        const historyState = withHistory(state, nextProject, "已生成分镜图像");
-        if (!historyState) {
-          return state;
-        }
-
-        return {
-          ...historyState,
-          transientObjectUrls: appendTransientObjectUrl(state.transientObjectUrls, result.url)
-        };
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "图像生成失败";
-      get().setNotice(message);
-    } finally {
-      set((state) => ({
-        busy: {
-          ...state.busy,
-          generatingPanelId: undefined
-        }
-      }));
-    }
-  },
-
-  removePanelBackground: async (id) => {
-    const panel = findPanel(get().project, id);
-    if (!panel?.image?.original) {
-      get().setNotice(panel ? "请先给分镜添加图片" : "找不到分镜");
-      return;
-    }
-
-    set((state) => ({
-      busy: {
-        ...state.busy,
-        removingBackgroundPanelId: id
-      },
-      ...withNotice(state, "正在去除背景...")
-    }));
-
-    try {
-      const previousNaturalWidth = Math.max(1, panel.image.naturalWidth ?? panel.width);
-      const previousNaturalHeight = Math.max(1, panel.image.naturalHeight ?? panel.height);
-      const payload = await createImagePayloadFromSource(panel.image.original, previousNaturalWidth, previousNaturalHeight);
-      const result = await removeImageBackground(get().aiServiceConfig, payload);
-
-      set((state) => {
-        const nextProject = updateProjectPanelById(state.project, id, (entry) => {
-          const entryNaturalWidth = Math.max(1, entry.image?.naturalWidth ?? entry.width);
-          const entryNaturalHeight = Math.max(1, entry.image?.naturalHeight ?? entry.height);
-          return {
-            ...entry,
-            image: {
-              original: result.url,
-              naturalWidth: result.naturalWidth,
-              naturalHeight: result.naturalHeight,
-              crop: scaleCropToImageSize(
-                entry.image?.crop,
-                entryNaturalWidth,
-                entryNaturalHeight,
-                result.naturalWidth,
-                result.naturalHeight
-              )
-            }
-          };
-        });
-
-        if (!nextProject) {
-          revokeObjectUrls([result.url]);
-          return {
-            ...withNotice(state, "分镜已不存在")
-          };
-        }
-
-        const historyState = withHistory(state, nextProject, "已去除分镜背景");
-        if (!historyState) {
-          revokeObjectUrls([result.url]);
-          return state;
-        }
-
-        return {
-          ...historyState,
-          transientObjectUrls: appendTransientObjectUrl(state.transientObjectUrls, result.url)
-        };
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "去背景失败";
-      get().setNotice(message);
-    } finally {
-      set((state) => ({
-        busy: {
-          ...state.busy,
-          removingBackgroundPanelId: undefined
-        }
-      }));
-    }
-  },
-
-  upscalePanelImage: async (id) => {
-    const panel = findPanel(get().project, id);
-    if (!panel?.image?.original) {
-      get().setNotice(panel ? "请先给分镜添加图片" : "找不到分镜");
-      return;
-    }
-
-    set((state) => ({
-      busy: {
-        ...state.busy,
-        upscalingPanelId: id
-      },
-      ...withNotice(state, "正在执行超分...")
-    }));
-
-    try {
-      const previousNaturalWidth = Math.max(1, panel.image.naturalWidth ?? panel.width);
-      const previousNaturalHeight = Math.max(1, panel.image.naturalHeight ?? panel.height);
-      const payload = await createImagePayloadFromSource(panel.image.original, previousNaturalWidth, previousNaturalHeight);
-      const result = await upscaleImage(get().aiServiceConfig, {
-        ...payload,
-        scale: UPSCALE_FACTOR,
-        targetWidth: Math.max(1, Math.round(previousNaturalWidth * UPSCALE_FACTOR)),
-        targetHeight: Math.max(1, Math.round(previousNaturalHeight * UPSCALE_FACTOR))
-      });
-
-      set((state) => {
-        const nextProject = updateProjectPanelById(state.project, id, (entry) => {
-          const entryNaturalWidth = Math.max(1, entry.image?.naturalWidth ?? entry.width);
-          const entryNaturalHeight = Math.max(1, entry.image?.naturalHeight ?? entry.height);
-          return {
-            ...entry,
-            image: {
-              original: result.url,
-              naturalWidth: result.naturalWidth,
-              naturalHeight: result.naturalHeight,
-              crop: scaleCropToImageSize(
-                entry.image?.crop,
-                entryNaturalWidth,
-                entryNaturalHeight,
-                result.naturalWidth,
-                result.naturalHeight
-              )
-            }
-          };
-        });
-
-        if (!nextProject) {
-          revokeObjectUrls([result.url]);
-          return {
-            ...withNotice(state, "分镜已不存在")
-          };
-        }
-
-        const historyState = withHistory(state, nextProject, `已完成分镜超分 x${UPSCALE_FACTOR}`);
-        if (!historyState) {
-          revokeObjectUrls([result.url]);
-          return state;
-        }
-
-        return {
-          ...historyState,
-          transientObjectUrls: appendTransientObjectUrl(state.transientObjectUrls, result.url)
-        };
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "超分失败";
-      get().setNotice(message);
-    } finally {
-      set((state) => ({
-        busy: {
-          ...state.busy,
-          upscalingPanelId: undefined
         }
       }));
     }

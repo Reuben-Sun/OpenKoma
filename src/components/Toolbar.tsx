@@ -1,8 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Switch } from "@radix-ui/themes";
-import { checkAiServiceHealth } from "../lib/api";
 import { getActivePage, useEditorStore } from "../lib/store";
-import { AiServiceConfig } from "../types";
 
 const inputClass = "studio-input h-9 px-3 text-sm";
 const selectClass = "studio-select h-9 px-3 text-sm";
@@ -14,16 +12,15 @@ const dangerButtonClass = `${buttonClass} studio-btn-danger`;
 const groupClass = "studio-subtle space-y-2 rounded-2xl p-3";
 const groupTitleClass = "text-[11px] uppercase tracking-[0.16em] text-[var(--text-secondary)]";
 
-type ToolCategory = "canvas" | "layout" | "style" | "objects" | "service" | "export";
+type ToolCategory = "canvas" | "layout" | "style" | "objects" | "export";
 
-const categories: ToolCategory[] = ["canvas", "layout", "style", "objects", "service", "export"];
+const categories: ToolCategory[] = ["canvas", "layout", "style", "objects", "export"];
 
 const categoryTitleMap: Record<ToolCategory, string> = {
   canvas: "画布设置",
   layout: "分镜布局",
   style: "批量样式",
   objects: "对象",
-  service: "服务配置",
   export: "导出"
 };
 
@@ -31,13 +28,6 @@ type ToolbarProps = {
   onExportPng: () => Promise<void>;
   onExportPdf: () => Promise<void>;
 };
-
-type ServiceHealthState =
-  | {
-      tone: "success" | "error";
-      message: string;
-    }
-  | null;
 
 export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
   const project = useEditorStore((state) => state.project);
@@ -47,15 +37,12 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
   const snapSizeTo16 = useEditorStore((state) => state.snapSizeTo16);
   const themeMode = useEditorStore((state) => state.themeMode);
   const busy = useEditorStore((state) => state.busy);
-  const aiServiceConfig = useEditorStore((state) => state.aiServiceConfig);
   const historyPastCount = useEditorStore((state) => state.historyPast.length);
   const historyFutureCount = useEditorStore((state) => state.historyFuture.length);
 
   const undo = useEditorStore((state) => state.undo);
   const redo = useEditorStore((state) => state.redo);
-  const setNotice = useEditorStore((state) => state.setNotice);
   const setProjectName = useEditorStore((state) => state.setProjectName);
-  const setAiServiceConfig = useEditorStore((state) => state.setAiServiceConfig);
   const setCanvasPreset = useEditorStore((state) => state.setCanvasPreset);
   const setCanvasSize = useEditorStore((state) => state.setCanvasSize);
   const setAllPanelsStyle = useEditorStore((state) => state.setAllPanelsStyle);
@@ -80,8 +67,6 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
   const [allRadius, setAllRadius] = useState(0);
   const [allBorderWidth, setAllBorderWidth] = useState(4);
   const [activeCategory, setActiveCategory] = useState<ToolCategory | null>(null);
-  const [checkingServiceHealth, setCheckingServiceHealth] = useState(false);
-  const [serviceHealthState, setServiceHealthState] = useState<ServiceHealthState>(null);
 
   useEffect(() => {
     setCanvasWidth(activePage.canvas.width);
@@ -113,10 +98,6 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [activeCategory]);
 
-  useEffect(() => {
-    setServiceHealthState(null);
-  }, [aiServiceConfig.authorization, aiServiceConfig.baseUrl]);
-
   const applyCanvasSize = (event: FormEvent) => {
     event.preventDefault();
     setCanvasSize(canvasWidth, canvasHeight);
@@ -124,36 +105,6 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
 
   const toggleCategory = (category: ToolCategory) => {
     setActiveCategory((current) => (current === category ? null : category));
-  };
-
-  const patchAiServiceConfig = (key: keyof AiServiceConfig) => (value: string) => {
-    setAiServiceConfig({
-      [key]: value
-    } as Partial<AiServiceConfig>);
-  };
-
-  const runServiceHealthCheck = async () => {
-    setCheckingServiceHealth(true);
-    setServiceHealthState(null);
-
-    try {
-      const result = await checkAiServiceHealth(aiServiceConfig);
-      const message = result.detail ? `${result.message} · ${result.detail}` : result.message;
-      setServiceHealthState({
-        tone: "success",
-        message
-      });
-      setNotice(`AI 服务检查通过：${message}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "服务检查失败";
-      setServiceHealthState({
-        tone: "error",
-        message
-      });
-      setNotice(`AI 服务检查失败：${message}`);
-    } finally {
-      setCheckingServiceHealth(false);
-    }
   };
 
   return (
@@ -400,58 +351,6 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
                   <button className={dangerButtonClass} disabled={!selection} onClick={() => deleteSelection()}>
                     删除选中对象
                   </button>
-                </div>
-              </section>
-            ) : null}
-
-            {activeCategory === "service" ? (
-              <section className={groupClass}>
-                <p className={groupTitleClass}>外部 AI 服务</p>
-                <div className="space-y-1">
-                  <p className="text-xs text-[var(--text-secondary)]">
-                    填写服务根地址后，OpenKoma 会自动调用固定端点：`/generate`、`/remove-background`、`/upscale`。
-                  </p>
-                  <p className="text-xs text-[var(--text-secondary)]">
-                    `Authorization` 为可选项，只保存在当前浏览器的 `localStorage`。你也可以先点检查按钮验证 `/healthz` 是否可访问。
-                  </p>
-                </div>
-
-                <label className="space-y-1">
-                  <span className={groupTitleClass}>服务 URL</span>
-                  <input
-                    className={inputClass}
-                    value={aiServiceConfig.baseUrl}
-                    placeholder="https://your-fastapi.example.com"
-                    onChange={(event) => patchAiServiceConfig("baseUrl")(event.target.value)}
-                  />
-                </label>
-
-                <label className="space-y-1">
-                  <span className={groupTitleClass}>身份认证（可选）</span>
-                  <input
-                    className={inputClass}
-                    value={aiServiceConfig.authorization}
-                    placeholder="Authorization / Bearer your-token"
-                    autoComplete="off"
-                    onChange={(event) => patchAiServiceConfig("authorization")(event.target.value)}
-                  />
-                </label>
-
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <button className={primaryButtonClass} disabled={checkingServiceHealth} onClick={() => void runServiceHealthCheck()}>
-                    {checkingServiceHealth ? "检查中..." : "检查 /healthz"}
-                  </button>
-                  {serviceHealthState ? (
-                    <span
-                      className={`rounded-full px-2.5 py-1 text-xs ${
-                        serviceHealthState.tone === "success"
-                          ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-200"
-                          : "bg-rose-500/15 text-rose-700 dark:text-rose-200"
-                      }`}
-                    >
-                      {serviceHealthState.message}
-                    </span>
-                  ) : null}
                 </div>
               </section>
             ) : null}

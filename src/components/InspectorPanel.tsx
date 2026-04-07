@@ -697,24 +697,15 @@ function CropEditor({ panel }: { panel: Panel }) {
 
 function PanelInspector({ panel }: { panel: Panel }) {
   const updatePanel = useEditorStore((state) => state.updatePanel);
-  const generateImageForPanel = useEditorStore((state) => state.generateImageForPanel);
   const uploadLocalImageForPanel = useEditorStore((state) => state.uploadLocalImageForPanel);
-  const removePanelBackground = useEditorStore((state) => state.removePanelBackground);
-  const upscalePanelImage = useEditorStore((state) => state.upscalePanelImage);
-  const generatingPanelId = useEditorStore((state) => state.busy.generatingPanelId);
   const uploadingPanelId = useEditorStore((state) => state.busy.uploadingPanelId);
-  const removingBackgroundPanelId = useEditorStore((state) => state.busy.removingBackgroundPanelId);
-  const upscalingPanelId = useEditorStore((state) => state.busy.upscalingPanelId);
 
   const [cropModalOpen, setCropModalOpen] = useState(false);
   const localImageInputRef = useRef<HTMLInputElement | null>(null);
   const panelRotation = normalizePanelRotation(panel.rotation);
   const panelShape = normalizePanelShape(panel.shape, panel.width);
-  const isGenerating = generatingPanelId === panel.id;
   const isUploading = uploadingPanelId === panel.id;
-  const isRemovingBackground = removingBackgroundPanelId === panel.id;
-  const isUpscaling = upscalingPanelId === panel.id;
-  const isImageBusy = isUploading || isGenerating || isRemovingBackground || isUpscaling;
+  const isImageBusy = isUploading;
 
   useEffect(() => {
     setCropModalOpen(false);
@@ -882,29 +873,6 @@ function PanelInspector({ panel }: { panel: Panel }) {
               打开手动裁剪
             </button>
           ) : null}
-
-          {panel.image?.original ? (
-            <>
-              <button
-                className={buttonClass}
-                disabled={isImageBusy}
-                onClick={() => {
-                  void removePanelBackground(panel.id);
-                }}
-              >
-                {isRemovingBackground ? "去背景中..." : "去背景"}
-              </button>
-              <button
-                className={buttonClass}
-                disabled={isImageBusy}
-                onClick={() => {
-                  void upscalePanelImage(panel.id);
-                }}
-              >
-                {isUpscaling ? "超分中..." : "超分 x2"}
-              </button>
-            </>
-          ) : null}
         </div>
 
         {panel.image?.original ? (
@@ -912,47 +880,11 @@ function PanelInspector({ panel }: { panel: Panel }) {
             <p className="text-xs text-[var(--text-secondary)]">
               当前图像尺寸: {panel.image.naturalWidth ?? "?"} x {panel.image.naturalHeight ?? "?"}
             </p>
-            <p className="text-xs text-[var(--text-secondary)]">去背景和超分会直接调用顶部“服务配置”里配置的外部接口。</p>
+            <p className="text-xs text-[var(--text-secondary)]">OpenKoma 现在是纯本地编辑器，这里只支持导入本地图片并进行非破坏裁剪。</p>
           </div>
         ) : (
-          <p className="text-xs text-[var(--text-secondary)]">未导入本地图像时，可继续使用 AI 生成。</p>
+          <p className="text-xs text-[var(--text-secondary)]">请先导入一张本地图片，再使用手动裁剪把画面贴合当前分镜。</p>
         )}
-      </div>
-
-      <div className={sectionClass}>
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-[var(--text-primary)]">AI 生成</h3>
-          <span className="studio-chip px-2.5 py-1 text-[11px]">Prompt</span>
-        </div>
-        <label className="space-y-1">
-          <span className={labelClass}>Prompt</span>
-          <textarea
-            className={textareaClass}
-            rows={4}
-            value={panel.prompt ?? ""}
-            onChange={(event) => patch("prompt")(event.target.value)}
-          />
-        </label>
-
-        <label className="space-y-1">
-          <span className={labelClass}>Negative Prompt</span>
-          <textarea
-            className={textareaClass}
-            rows={3}
-            value={panel.negativePrompt ?? ""}
-            onChange={(event) => patch("negativePrompt")(event.target.value)}
-          />
-        </label>
-
-        <button
-          className={primaryButtonClass}
-          disabled={isImageBusy}
-          onClick={() => {
-            void generateImageForPanel(panel.id);
-          }}
-        >
-          {isGenerating ? "生成中..." : "生成图像"}
-        </button>
       </div>
 
       <CropEditor panel={panel} />

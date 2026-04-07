@@ -55,8 +55,6 @@ export function createPanel(input: Pick<Panel, "x" | "y" | "width" | "height"> &
     borderWidth: input.borderWidth ?? DEFAULT_PANEL_STYLE.borderWidth,
     gap: input.gap ?? DEFAULT_PANEL_STYLE.gap,
     image: input.image,
-    prompt: input.prompt ?? "",
-    negativePrompt: input.negativePrompt ?? "",
     parentId: input.parentId
   };
 }
@@ -98,8 +96,7 @@ export function createProjectPage(input: CreatePageInput = {}): ProjectPage {
             x: 40,
             y: 40,
             width: canvas.width - 80,
-            height: canvas.height - 80,
-            prompt: "漫画分镜，一个少年站在雨中，赛博朋克风格，高细节"
+            height: canvas.height - 80
           })
         ]);
 
