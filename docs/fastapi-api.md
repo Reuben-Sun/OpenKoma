@@ -8,7 +8,7 @@ The toolbar now exposes one service configuration drawer with:
 
 - `baseUrl`: FastAPI service root, for example `https://your-fastapi.example.com`
 - `Authorization`: optional, copied as-is into the `Authorization` request header
-- `Check /health`: sends `GET <baseUrl>/health`
+- `Check /healthz`: sends `GET <baseUrl>/healthz`
 
 Notes:
 
@@ -18,7 +18,7 @@ Notes:
   - `POST <baseUrl>/generate`
   - `POST <baseUrl>/remove-background`
   - `POST <baseUrl>/upscale`
-  - `GET <baseUrl>/health`
+  - `GET <baseUrl>/healthz`
 - Because requests come directly from the browser, your FastAPI service must allow CORS for the OpenKoma origin, such as `http://localhost:5173` during development.
 - If an endpoint returns a JSON `url`, that URL must also be browser-accessible with CORS enabled, because OpenKoma will fetch it again to measure the image and keep the workflow consistent.
 
@@ -125,7 +125,7 @@ Your FastAPI implementation may ignore `scale`, `targetWidth`, or `targetHeight`
 
 ### Endpoint
 
-`GET <baseUrl>/health`
+`GET <baseUrl>/healthz`
 
 ### Allowed Success Responses
 

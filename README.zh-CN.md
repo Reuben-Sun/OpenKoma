@@ -83,7 +83,7 @@ npm run dev
 - `POST <baseUrl>/generate`
 - `POST <baseUrl>/remove-background`
 - `POST <baseUrl>/upscale`
-- `GET <baseUrl>/health`
+- `GET <baseUrl>/healthz`
 
 FastAPI 接口约定文档：
 - `docs/fastapi-api.md`

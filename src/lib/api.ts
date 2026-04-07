@@ -386,7 +386,7 @@ function describeHealthPayload(payload: unknown): string | undefined {
 }
 
 export async function checkAiServiceHealth(config: AiServiceConfig): Promise<HealthResponse> {
-  const response = await fetch(getRequiredEndpoint(config, "health"), {
+  const response = await fetch(getRequiredEndpoint(config, "healthz"), {
     method: "GET",
     headers: config.authorization
       ? {

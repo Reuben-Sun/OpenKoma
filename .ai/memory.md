@@ -10,14 +10,14 @@
 - 抽屉里只保留：
   - 服务 URL
   - 可选身份认证
-  - `检查 /health` 按钮
+  - `检查 /healthz` 按钮
 
 ### 前端请求约定
 - 前端不再要求分别填写三个接口 URL，而是从 `baseUrl` 派生固定端点：
   - `POST /generate`
   - `POST /remove-background`
   - `POST /upscale`
-  - `GET /health`
+  - `GET /healthz`
 - `Authorization` 依旧原样写入请求头；为空时不发送
 - 兼容旧版本地配置：若浏览器里还保留历史的三个 URL，会尽量自动推导出新的 `baseUrl`
 

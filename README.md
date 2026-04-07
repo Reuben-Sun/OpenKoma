@@ -83,7 +83,7 @@ OpenKoma will then call these fixed endpoints automatically:
 - `POST <baseUrl>/generate`
 - `POST <baseUrl>/remove-background`
 - `POST <baseUrl>/upscale`
-- `GET <baseUrl>/health`
+- `GET <baseUrl>/healthz`
 
 API contract for your FastAPI service:
 - `docs/fastapi-api.md`

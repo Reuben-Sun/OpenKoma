@@ -412,7 +412,7 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
                     填写服务根地址后，OpenKoma 会自动调用固定端点：`/generate`、`/remove-background`、`/upscale`。
                   </p>
                   <p className="text-xs text-[var(--text-secondary)]">
-                    `Authorization` 为可选项，只保存在当前浏览器的 `localStorage`。你也可以先点检查按钮验证 `/health` 是否可访问。
+                    `Authorization` 为可选项，只保存在当前浏览器的 `localStorage`。你也可以先点检查按钮验证 `/healthz` 是否可访问。
                   </p>
                 </div>
 
@@ -439,7 +439,7 @@ export default function Toolbar({ onExportPng, onExportPdf }: ToolbarProps) {
 
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                   <button className={primaryButtonClass} disabled={checkingServiceHealth} onClick={() => void runServiceHealthCheck()}>
-                    {checkingServiceHealth ? "检查中..." : "检查 /health"}
+                    {checkingServiceHealth ? "检查中..." : "检查 /healthz"}
                   </button>
                   {serviceHealthState ? (
                     <span
