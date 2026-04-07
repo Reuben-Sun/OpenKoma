@@ -59,16 +59,6 @@ export function normalizePanelShape(shape?: Partial<PanelShape> | null, width = 
   };
 }
 
-export function isRectPanelShape(shape?: Partial<PanelShape> | null, width = 240): boolean {
-  const normalized = normalizePanelShape(shape, width);
-  return (
-    Math.abs(normalized.topLeft - RECT_PANEL_SHAPE.topLeft) < 0.0001 &&
-    Math.abs(normalized.topRight - RECT_PANEL_SHAPE.topRight) < 0.0001 &&
-    Math.abs(normalized.bottomRight - RECT_PANEL_SHAPE.bottomRight) < 0.0001 &&
-    Math.abs(normalized.bottomLeft - RECT_PANEL_SHAPE.bottomLeft) < 0.0001
-  );
-}
-
 export function normalizePanelRotation(rotation?: number): number {
   const raw = Number(rotation ?? 0);
   if (!Number.isFinite(raw)) {
@@ -125,10 +115,6 @@ export function getPanelLocalPoints(panel: Pick<Panel, "width" | "height" | "sha
     { x: panel.width * shape.bottomRight, y: panel.height },
     { x: panel.width * shape.bottomLeft, y: panel.height }
   ];
-}
-
-export function getPanelPointArray(panel: Pick<Panel, "width" | "height" | "shape">): number[] {
-  return getPanelLocalPoints(panel).flatMap((point) => [point.x, point.y]);
 }
 
 export function getPanelShapeHandlePoint(

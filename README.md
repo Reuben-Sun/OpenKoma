@@ -1,127 +1,119 @@
-<div align="center">
+# OpenKoma
 
-<h1>OpenKoma</h1>
+> Local-first comic layout editor for skewed panels, non-destructive image crop, and multi-page export.
 
-<p><strong>Local-First Comic Layout Editor</strong><br/>A production-focused open-source workflow for comic layout, non-destructive image crop, and reversible history.</p>
+[English](./README.md) | [简体中文](./README.zh-CN.md)
 
-<p>
-  <img alt="license" src="https://img.shields.io/badge/License-Apache%202.0-2ea44f?style=for-the-badge" />
-  <img alt="frontend" src="https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-61dafb?style=for-the-badge" />
-  <img alt="canvas" src="https://img.shields.io/badge/Canvas-Konva-0ea5e9?style=for-the-badge" />
-  <img alt="workflow" src="https://img.shields.io/badge/Workflow-Local%20Only-111827?style=for-the-badge" />
-  <img alt="state" src="https://img.shields.io/badge/State-Zustand-f59e0b?style=for-the-badge" />
-</p>
+## Overview
 
-<p>
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/react/react-original.svg" width="28" alt="React" />
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/typescript/typescript-original.svg" width="28" alt="TypeScript" />
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/nodejs/nodejs-original.svg" width="28" alt="Node.js" />
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/vitejs/vitejs-original.svg" width="28" alt="Vite" />
-</p>
+OpenKoma is a pure local editor for comic page layout. It focuses on the parts of production that need to feel reliable every day: panel composition, local image placement, manual crop, speech bubbles, multi-page management, and reversible editing history.
 
-<p>
-  <a href="./README.md"><strong>English</strong></a> |
-  <a href="./README.zh-CN.md">简体中文</a>
-</p>
+The app runs entirely on the client side. There is no bundled backend, no external image service, and no account or API setup.
 
-</div>
+## Core Capabilities
 
-## Abstract
-OpenKoma is a local-first comic creation environment designed for practical production instead of demo-only workflows. It combines panel composition, bubble editing, local image import with non-destructive crop, multi-page management, and incremental undo/redo history in a pure local editor.
+- True skewed panels: supports rectangles, parallelograms, and trapezoids instead of only rotated rectangles.
+- Non-destructive crop: imported images keep their original data while crop parameters control rendering.
+- Crop editor that matches panel geometry: the manual crop overlay follows the edited skewed panel shape.
+- Multi-page workflow: create, reorder, duplicate structure through splitting tools, and export in page order.
+- Incremental undo/redo: editing history is stored as forward/backward JSON patches.
+- Local-first persistence: save to a folder when File System Access is available, or export/import a single `.openkoma.json` file.
 
-## Why OpenKoma
-- Incremental reversible editing: every mutation records forward/backward JSON patches for reliable undo/redo.
-- Non-destructive image workflow: original local assets stay intact while crop parameters drive rendering.
-- True skewed panels: panels support parallelogram and trapezoid shapes instead of simple rotated rectangles.
-- Multi-page production flow: page list with add/delete/reorder, plus ordered multi-page PDF export.
-- Pure local workflow: no external service configuration, no backend dependency, and only local image import.
-- Local-first persistence: save directly to a picked folder when File System Access is available, or export/import a single `.openkoma.json` file as fallback.
+## Editor Features
 
-## Feature Highlights
-- Canvas and layout
-  - A4/A3 presets + custom dimensions
-  - Grid split, draw-to-create panels, secondary split on selected panel
-  - Skew editing with corner dragging and numeric presets
-- Panel and object editing
-  - Drag/resize/select with visual feedback
-  - Global one-click style apply (corner radius and border width)
-  - Optional 16-multiple size snapping during resize/transform
-- Image workflow
-  - Local image import per panel
-  - Manual crop editor that matches skewed panel shape
-  - Display without stretch (`cover` + clip behavior)
-- Multi-page and export
-  - Left page list with live previews
-  - PNG export for current page
-  - PDF export for all pages in page order
-- UX system
-  - Compact top toolbar + category-based expandable tool drawers
-  - Bottom fixed message bar with expandable history records
-  - Light/dark mode switch via Radix Themes
+### Layout
 
-## Quick Start
+- A4, A3, and custom canvas sizes
+- Grid split for the full canvas
+- Secondary split for the selected panel
+- Drag-to-create manual panel mode
+- Optional size snapping to multiples of 16
+
+### Panel and Bubble Editing
+
+- Select, move, and resize panels and bubbles on canvas
+- Corner-handle skew editing for panel shapes
+- Batch style tools for border radius and border width
+- Speech bubble creation and text editing
+
+### Image Workflow
+
+- Import images from your computer only
+- Manual crop editor for panel images
+- Cover-style display without stretch
+- Original image remains untouched after crop edits
+
+### Export and Save
+
+- Export current page as PNG
+- Export all pages as a PDF
+- Save/load through a chosen local directory
+- Fallback project exchange via `.openkoma.json`
+
+## Getting Started
+
 ### Requirements
+
 - Node.js 18+
 - npm 9+
 
-### Run
+### Development
+
 ```bash
 npm install
 npm run dev
 ```
 
-Default app URL:
-- Web: `http://localhost:5173`
+Default URL: `http://localhost:5173`
 
-### Local Workflow
-- Import images from your computer in the panel inspector.
-- Edit crop non-destructively inside the manual crop modal.
-- Save to a folder or export/import a single `.openkoma.json` file.
-- No backend or external service setup is required.
+### Production Build
 
-### Build
 ```bash
 npm run build
 ```
 
-## Persistence
-- With File System Access API support, OpenKoma saves `project.json`, `history.log`, and image assets into the folder you choose.
-- Without it, OpenKoma falls back to downloading and loading a single `.openkoma.json` file with images embedded as data URLs when possible.
-- Imported images remain local project assets; OpenKoma no longer provides external generation, background removal, or upscaling features.
+## Local Project Format
+
+When directory access is available, OpenKoma writes project data into the folder you choose:
+
+- `project.json`: layout and editor state
+- `history.log`: undo/redo history and notices
+- `images/*`: imported local assets copied into the project folder
+
+When directory access is not available, OpenKoma falls back to a single exported `.openkoma.json` file and embeds image data when possible.
+
+Remote image URLs are not part of the supported workflow anymore. If an old project still contains external image links, OpenKoma may warn that those assets cannot be materialized during save.
+
+## Typical Workflow
+
+1. Set the page size and create panels with grid split or manual drawing.
+2. Refine panel shapes by dragging skew handles into parallelograms or trapezoids.
+3. Import local images for selected panels.
+4. Open the manual crop editor and adjust the visible area non-destructively.
+5. Add speech bubbles, then save the project or export PNG/PDF.
 
 ## Keyboard Shortcuts
-- `Cmd/Ctrl + Z`: Undo
-- `Cmd/Ctrl + Shift + Z` or `Ctrl + Y`: Redo
-- `Delete` or `Backspace`: Delete selected panel/bubble
+
+- `Cmd/Ctrl + Z`: undo
+- `Cmd/Ctrl + Shift + Z` or `Ctrl + Y`: redo
+- `Delete` or `Backspace`: delete selected panel or bubble
+- `Esc`: close the active toolbar drawer
+
+## Tech Stack
+
+- React + TypeScript
+- Zustand
+- Konva / React Konva
+- Vite
+- Radix Themes
 
 ## Roadmap
-<details>
-  <summary><strong>Planned Milestones (click to expand)</strong></summary>
 
-### Milestone A - Export and Publishing
-- [ ] PSD layered export pipeline
-- [ ] More print-oriented export presets
-
-### Milestone B - Layout Efficiency
-- [ ] Multi-select editing and batch operations
-- [ ] Batch align/distribute tools for panels and bubbles
-
-### Milestone C - Template and Typography
-- [ ] Advanced comic layout template packs
-- [ ] Richer typography and bubble-tail editing system
-
-</details>
-
-## Citation
-```bibtex
-@software{openkoma2026,
-  title = {OpenKoma: A Local-First Comic Layout Editor with Incremental Reversible History},
-  author = {OpenKoma Authors},
-  year = {2026},
-  url = {https://github.com/<your-org>/OpenKoma},
-  license = {Apache-2.0}
-}
-```
+- PSD layered export
+- Multi-select and batch alignment tools
+- More layout templates and typography controls
+- More print-oriented export presets
 
 ## License
+
 Apache License 2.0. See [LICENSE](./LICENSE).

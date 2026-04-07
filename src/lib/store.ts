@@ -51,7 +51,6 @@ type EditorStore = {
 
   setNotice: (notice?: string) => void;
   setThemeMode: (mode: ThemeMode) => void;
-  toggleThemeMode: () => void;
 
   undo: () => void;
   redo: () => void;
@@ -1681,17 +1680,6 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       return {
         themeMode: mode,
         ...withNotice(state, mode === "dark" ? "已切换为黑暗模式" : "已切换为明亮模式")
-      };
-    });
-  },
-
-  toggleThemeMode: () => {
-    set((state) => {
-      const nextMode: ThemeMode = state.themeMode === "dark" ? "light" : "dark";
-      persistThemeMode(nextMode);
-      return {
-        themeMode: nextMode,
-        ...withNotice(state, nextMode === "dark" ? "已切换为黑暗模式" : "已切换为明亮模式")
       };
     });
   },

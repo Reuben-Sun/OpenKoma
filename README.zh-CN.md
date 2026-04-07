@@ -1,127 +1,119 @@
-<div align="center">
+# OpenKoma
 
-<h1>OpenKoma</h1>
+> 纯本地漫画分镜编辑器，支持斜切分镜、非破坏图像裁剪与多页面导出。
 
-<p><strong>本地优先漫画分镜编辑器</strong><br/>面向真实生产流程的开源工具：分镜布局、非破坏图像裁剪、可逆增量历史。</p>
+[English](./README.md) | [简体中文](./README.zh-CN.md)
 
-<p>
-  <img alt="license" src="https://img.shields.io/badge/License-Apache%202.0-2ea44f?style=for-the-badge" />
-  <img alt="frontend" src="https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-61dafb?style=for-the-badge" />
-  <img alt="canvas" src="https://img.shields.io/badge/Canvas-Konva-0ea5e9?style=for-the-badge" />
-  <img alt="workflow" src="https://img.shields.io/badge/Workflow-纯本地-111827?style=for-the-badge" />
-  <img alt="state" src="https://img.shields.io/badge/State-Zustand-f59e0b?style=for-the-badge" />
-</p>
+## 项目简介
 
-<p>
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/react/react-original.svg" width="28" alt="React" />
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/typescript/typescript-original.svg" width="28" alt="TypeScript" />
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/nodejs/nodejs-original.svg" width="28" alt="Node.js" />
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/vitejs/vitejs-original.svg" width="28" alt="Vite" />
-</p>
+OpenKoma 是一个专注于漫画页面排版的纯本地编辑器，核心关注点是日常生产里最需要稳定可靠的环节：分镜布局、本地图像放置、手动裁剪、气泡编辑、多页面管理，以及可逆的编辑历史。
 
-<p>
-  <a href="./README.md">English</a> |
-  <a href="./README.zh-CN.md"><strong>简体中文</strong></a>
-</p>
+应用完全运行在客户端，不内置后端、不依赖外部图像服务，也不需要账号或 API 配置。
 
-</div>
+## 核心能力
 
-## 摘要
-OpenKoma 是一个本地优先的漫画创作环境，重点不是“演示功能”，而是可落地的创作流程：分镜编辑、气泡编辑、本地图像导入与非破坏裁剪、多页面管理，以及增量式撤销重做，整体回归为纯本地编辑器。
+- 真正的斜切分镜：支持矩形、平行四边形、梯形，而不只是旋转矩形。
+- 非破坏裁剪：导入原图始终保留，显示结果只由裁剪参数驱动。
+- 与分镜形状一致的裁剪编辑：手动裁剪层会跟随分镜的斜切几何形状。
+- 多页面工作流：可创建页面、调整顺序，并按页面顺序导出。
+- 增量撤销重做：编辑历史以 forward/backward JSON patch 的形式记录。
+- 本地优先持久化：支持直接保存到目录，也支持导出/导入单个 `.openkoma.json` 文件。
 
-## 核心卖点
-- 增量可逆编辑：每次修改都会生成 forward/backward patch，撤销重做稳定可追溯。
-- 非破坏图像流程：始终保存原图，显示层只使用裁剪参数，不破坏素材。
-- 真正的斜切分镜：支持平行四边形与梯形，不只是旋转矩形。
-- 多页面生产流程：页面列表支持新增/删除/排序，PDF 按页面顺序整本导出。
-- 纯本地工作流：不再需要外部服务配置，也不依赖后端，只支持导入本地图片进行编辑。
-- 本地优先持久化：支持直接保存到选择的目录；不支持目录访问时，回退为单个 `.openkoma.json` 文件导入导出。
+## 编辑器功能
 
-## 主要功能
-- 画布与分镜
-  - A4/A3 预设 + 自定义尺寸
-  - 网格切割、手绘创建分镜、选中后二次切割
-  - 斜切分镜支持画布角点拖拽与预设快速套用
-- 对象编辑
-  - 分镜/气泡拖拽、缩放、选中高亮
-  - 一键批量设置所有分镜圆角与边框粗细
-  - 可选 16 倍数尺寸吸附
-- 图像流程
-  - 单分镜本地导图
-  - 与斜切分镜一致的手动裁剪编辑
-  - 显示不拉伸（`cover` + clip）
-- 页面与导出
-  - 左侧页面列表与实时预览
-  - 当前页导出 PNG
-  - 全部页面按顺序导出 PDF
-- 编辑器体验
-  - 顶部单行工具栏 + 分类展开工具抽屉
-  - 底部固定消息栏（可展开历史）
-  - Radix Themes 明暗模式切换
+### 布局
+
+- A4、A3 与自定义画布尺寸
+- 整页网格切割
+- 对选中分镜进行二次切割
+- 拖拽创建分镜
+- 可选 16 倍数尺寸吸附
+
+### 分镜与气泡编辑
+
+- 画布内直接选择、移动、缩放分镜与气泡
+- 通过角点手柄编辑分镜斜切形状
+- 一键批量设置边框粗细与圆角
+- 气泡创建与文本编辑
+
+### 图像流程
+
+- 仅支持从本地电脑导入图片
+- 支持手动裁剪分镜图片
+- 以 `cover` 方式铺满，不做拉伸变形
+- 裁剪后仍保留原始图像数据
+
+### 导出与保存
+
+- 当前页导出 PNG
+- 全部页面导出 PDF
+- 保存 / 加载到本地目录
+- 无目录权限时回退为 `.openkoma.json`
 
 ## 快速开始
+
 ### 环境要求
+
 - Node.js 18+
 - npm 9+
 
-### 启动
+### 开发启动
+
 ```bash
 npm install
 npm run dev
 ```
 
-默认地址：
-- 前端：`http://localhost:5173`
-
-### 纯本地使用方式
-- 在右侧属性面板里从电脑导入本地图片。
-- 通过“打开手动裁剪”进行非破坏编辑。
-- 保存到目录，或导出/导入单个 `.openkoma.json` 项目文件。
-- 不需要配置任何后端或外部服务。
+默认地址：`http://localhost:5173`
 
 ### 构建
+
 ```bash
 npm run build
 ```
 
-## 保存与加载
-- 在支持 File System Access API 的环境中，OpenKoma 会把 `project.json`、`history.log` 和图片资源保存到你选择的目录。
-- 在不支持目录访问的环境中，OpenKoma 会回退为下载/加载单个 `.openkoma.json` 文件，并尽量把图片以内嵌 data URL 的方式一起保存。
-- 导入的图片会作为本地项目资源保存；OpenKoma 不再提供生图、去背景、超分等外部调用能力。
+## 本地项目格式
+
+在支持目录访问的环境里，OpenKoma 会把项目内容写入你选择的目录：
+
+- `project.json`：版面与编辑器状态
+- `history.log`：撤销/重做历史与消息记录
+- `images/*`：复制进项目目录的本地图片资源
+
+如果当前环境不支持目录访问，OpenKoma 会回退为导出单个 `.openkoma.json` 文件，并在可能的情况下把图片数据一起内嵌进去。
+
+现在已经不再支持远端图片工作流。如果旧项目里仍保留外链图片，保存时可能会提示这些资源无法被物化到本地项目中。
+
+## 典型使用流程
+
+1. 先设置画布尺寸，再用网格切割或手绘方式创建分镜。
+2. 通过角点手柄把分镜进一步调整为平行四边形或梯形。
+3. 为选中的分镜导入本地图片。
+4. 打开手动裁剪，对可见区域做非破坏调整。
+5. 添加气泡后保存项目，或导出 PNG / PDF。
 
 ## 快捷键
+
 - `Cmd/Ctrl + Z`：撤销
 - `Cmd/Ctrl + Shift + Z` 或 `Ctrl + Y`：重做
-- `Delete` 或 `Backspace`：删除当前选中分镜/气泡
+- `Delete` 或 `Backspace`：删除当前选中的分镜或气泡
+- `Esc`：关闭当前展开的工具抽屉
 
-## Roadmap
-<details>
-  <summary><strong>开发路线图（点击展开）</strong></summary>
+## 技术栈
 
-### 里程碑 A - 导出与发布
-- [ ] PSD 分层导出
-- [ ] 更完善的印刷导出预设
+- React + TypeScript
+- Zustand
+- Konva / React Konva
+- Vite
+- Radix Themes
 
-### 里程碑 B - 编辑效率
-- [ ] 多选与批量编辑
-- [ ] 分镜/气泡批量对齐与分布
+## 开发路线图
 
-### 里程碑 C - 模板与排版
-- [ ] 高级漫画版式模板包
-- [ ] 更丰富的字体排版与气泡尾巴编辑
-
-</details>
-
-## 引用
-```bibtex
-@software{openkoma2026,
-  title = {OpenKoma: A Local-First Comic Layout Editor with Incremental Reversible History},
-  author = {OpenKoma Authors},
-  year = {2026},
-  url = {https://github.com/<your-org>/OpenKoma},
-  license = {Apache-2.0}
-}
-```
+- PSD 分层导出
+- 多选与批量对齐工具
+- 更多版式模板与排版控制
+- 更完整的印刷导出预设
 
 ## 协议
+
 Apache License 2.0，详见 [LICENSE](./LICENSE)。
