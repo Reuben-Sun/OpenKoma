@@ -4,15 +4,16 @@ import { Circle, Ellipse, Group, Image as KonvaImage, Layer, Line, Rect, Shape, 
 import useImage from "use-image";
 import { Bubble, Panel, PanelShape } from "../types";
 import {
-  drawRoundedPolygonPath,
-  getInsetPanelLocalPoints,
+  PANEL_SHAPE_HANDLE_KEYS,
+  PanelShapeKey,
   getPanelRenderTransform,
-  getPolygonBounds,
-  PANEL_SHAPE_MAX_RATIO,
-  PANEL_SHAPE_MIN_RATIO,
+  getPanelShapeGuideLines,
+  getPanelShapeHandlePoint,
   normalizePanelRotation,
-  normalizePanelShape
+  normalizePanelShape,
+  updatePanelShapeHandle
 } from "../lib/panelGeometry";
+import { drawPanelPath, getPanelImageLayout } from "../lib/panelRender";
 import { getActivePage, useEditorStore } from "../lib/store";
 
 type DraftRect = {
@@ -64,22 +65,9 @@ function waitForStageRefresh(): Promise<void> {
   });
 }
 
-type PathDrawingContext = Pick<CanvasRenderingContext2D, "moveTo" | "lineTo" | "quadraticCurveTo">;
-type PanelShapeKey = keyof PanelShape;
-
-const MIN_PANEL_EDGE_WIDTH = 24;
 const SKEW_HANDLE_RADIUS = 7;
 const SKEW_HANDLE_COLOR = "#2563eb";
 const SKEW_GUIDE_COLOR = "rgba(37, 99, 235, 0.35)";
-
-function getPanelMinEdgeSpan(width: number) {
-  return width * Math.min(0.96, MIN_PANEL_EDGE_WIDTH / Math.max(24, width));
-}
-
-function drawPanelPath(context: PathDrawingContext, panel: Pick<Panel, "width" | "height" | "shape" | "borderRadius">, inset = 0) {
-  const points = getInsetPanelLocalPoints(panel, inset);
-  drawRoundedPolygonPath(context, points, Math.max(0, panel.borderRadius - inset));
-}
 
 function PanelFillShape({ panel }: { panel: Panel }) {
   return (
@@ -126,20 +114,13 @@ function PanelImageLayer({ panel }: { panel: Panel }) {
     return null;
   }
 
-  const clipPoints = getInsetPanelLocalPoints(panel, panel.gap);
-  const clipBounds = getPolygonBounds(clipPoints);
-  const innerWidth = clipBounds.width;
-  const innerHeight = clipBounds.height;
-
-  const crop = panel.image.crop;
-  const sourceWidth = crop?.width ?? panel.image.naturalWidth ?? image.width;
-  const sourceHeight = crop?.height ?? panel.image.naturalHeight ?? image.height;
-  const coverScale = Math.max(innerWidth / Math.max(1, sourceWidth), innerHeight / Math.max(1, sourceHeight));
-  const drawScale = coverScale * (crop?.scale ?? 1);
-  const drawWidth = sourceWidth * drawScale;
-  const drawHeight = sourceHeight * drawScale;
-  const offsetX = clipBounds.minX + (innerWidth - drawWidth) / 2;
-  const offsetY = clipBounds.minY + (innerHeight - drawHeight) / 2;
+  const imageLayout = getPanelImageLayout(panel, {
+    width: image.width,
+    height: image.height
+  });
+  if (!imageLayout) {
+    return null;
+  }
 
   return (
     <Group
@@ -152,54 +133,14 @@ function PanelImageLayer({ panel }: { panel: Panel }) {
     >
       <KonvaImage
         image={image}
-        x={offsetX}
-        y={offsetY}
-        width={drawWidth}
-        height={drawHeight}
-        crop={
-          crop
-            ? {
-                x: crop.x,
-                y: crop.y,
-                width: crop.width,
-                height: crop.height
-              }
-            : undefined
-        }
+        x={imageLayout.offsetX}
+        y={imageLayout.offsetY}
+        width={imageLayout.drawWidth}
+        height={imageLayout.drawHeight}
+        crop={imageLayout.cropRect}
         listening={false}
       />
     </Group>
-  );
-}
-
-function getHandleY(key: PanelShapeKey, height: number) {
-  return key.startsWith("top") ? 0 : height;
-}
-
-function clampHandleX(shape: PanelShape, key: PanelShapeKey, width: number, nextX: number) {
-  const minSpan = getPanelMinEdgeSpan(width);
-  const minX = width * PANEL_SHAPE_MIN_RATIO;
-  const maxX = width * PANEL_SHAPE_MAX_RATIO;
-  if (key === "topLeft") {
-    return Math.min(Math.max(minX, nextX), width * shape.topRight - minSpan);
-  }
-  if (key === "topRight") {
-    return Math.max(width * shape.topLeft + minSpan, Math.min(maxX, nextX));
-  }
-  if (key === "bottomLeft") {
-    return Math.min(Math.max(minX, nextX), width * shape.bottomRight - minSpan);
-  }
-  return Math.max(width * shape.bottomLeft + minSpan, Math.min(maxX, nextX));
-}
-
-function updateShapeHandle(shape: PanelShape, key: PanelShapeKey, width: number, x: number) {
-  const clampedX = clampHandleX(shape, key, width, x);
-  return normalizePanelShape(
-    {
-      ...shape,
-      [key]: clampedX / Math.max(1, width)
-    },
-    width
   );
 }
 
@@ -214,8 +155,7 @@ function PanelSkewHandles({
 }) {
   const shape = normalizePanelShape(panel.shape, panel.width);
   const transform = getPanelRenderTransform(panel);
-  const guideTop = [shape.topLeft * panel.width, 0, shape.topRight * panel.width, 0];
-  const guideBottom = [shape.bottomLeft * panel.width, panel.height, shape.bottomRight * panel.width, panel.height];
+  const guideLines = getPanelShapeGuideLines(panel);
 
   const createBoundFunc =
     (key: PanelShapeKey) =>
@@ -227,16 +167,11 @@ function PanelSkewHandles({
 
       const inverse = parent.getAbsoluteTransform().copy().invert();
       const localPoint = inverse.point(position);
-      const nextShape = updateShapeHandle(shape, key, panel.width, localPoint.x);
-      const nextLocalPoint = {
-        x: nextShape[key] * panel.width,
-        y: getHandleY(key, panel.height)
-      };
+      const nextShape = updatePanelShapeHandle(shape, key, panel.width, localPoint.x);
+      const nextLocalPoint = getPanelShapeHandlePoint({ width: panel.width, height: panel.height, shape: nextShape }, key);
 
       return parent.getAbsoluteTransform().point(nextLocalPoint);
     };
-
-  const handleKeys: PanelShapeKey[] = ["topLeft", "topRight", "bottomRight", "bottomLeft"];
 
   return (
     <Group
@@ -247,37 +182,41 @@ function PanelSkewHandles({
       offsetY={transform.offsetY}
       rotation={transform.rotation}
     >
-      <Line points={guideTop} stroke={SKEW_GUIDE_COLOR} strokeWidth={2} dash={[8, 5]} listening={false} />
-      <Line points={guideBottom} stroke={SKEW_GUIDE_COLOR} strokeWidth={2} dash={[8, 5]} listening={false} />
+      <Line points={guideLines.top} stroke={SKEW_GUIDE_COLOR} strokeWidth={2} dash={[8, 5]} listening={false} />
+      <Line points={guideLines.bottom} stroke={SKEW_GUIDE_COLOR} strokeWidth={2} dash={[8, 5]} listening={false} />
 
-      {handleKeys.map((key) => (
-        <Circle
-          key={key}
-          name="panel-skew-handle"
-          x={shape[key] * panel.width}
-          y={getHandleY(key, panel.height)}
-          radius={SKEW_HANDLE_RADIUS}
-          fill="#dbeafe"
-          stroke={SKEW_HANDLE_COLOR}
-          strokeWidth={2}
-          draggable
-          dragBoundFunc={createBoundFunc(key)}
-          onMouseDown={(event) => {
-            event.cancelBubble = true;
-          }}
-          onTouchStart={(event) => {
-            event.cancelBubble = true;
-          }}
-          onDragMove={(event) => {
-            event.cancelBubble = true;
-            onDraftChange(updateShapeHandle(shape, key, panel.width, event.target.x()));
-          }}
-          onDragEnd={(event) => {
-            event.cancelBubble = true;
-            onCommit(updateShapeHandle(shape, key, panel.width, event.target.x()));
-          }}
-        />
-      ))}
+      {PANEL_SHAPE_HANDLE_KEYS.map((key) => {
+        const handlePoint = getPanelShapeHandlePoint(panel, key);
+
+        return (
+          <Circle
+            key={key}
+            name="panel-skew-handle"
+            x={handlePoint.x}
+            y={handlePoint.y}
+            radius={SKEW_HANDLE_RADIUS}
+            fill="#dbeafe"
+            stroke={SKEW_HANDLE_COLOR}
+            strokeWidth={2}
+            draggable
+            dragBoundFunc={createBoundFunc(key)}
+            onMouseDown={(event) => {
+              event.cancelBubble = true;
+            }}
+            onTouchStart={(event) => {
+              event.cancelBubble = true;
+            }}
+            onDragMove={(event) => {
+              event.cancelBubble = true;
+              onDraftChange(updatePanelShapeHandle(shape, key, panel.width, event.target.x()));
+            }}
+            onDragEnd={(event) => {
+              event.cancelBubble = true;
+              onCommit(updatePanelShapeHandle(shape, key, panel.width, event.target.x()));
+            }}
+          />
+        );
+      })}
     </Group>
   );
 }

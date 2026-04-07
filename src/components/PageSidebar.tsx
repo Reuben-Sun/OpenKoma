@@ -2,19 +2,13 @@ import { useMemo } from "react";
 import { Ellipse, Group, Image as KonvaImage, Layer, Rect, Shape, Stage, Text } from "react-konva";
 import useImage from "use-image";
 import { Bubble, Panel, ProjectPage } from "../types";
-import { drawRoundedPolygonPath, getInsetPanelLocalPoints, getPanelRenderTransform, getPolygonBounds } from "../lib/panelGeometry";
+import { getPanelRenderTransform } from "../lib/panelGeometry";
+import { drawPanelPath, getPanelImageLayout } from "../lib/panelRender";
 import { useEditorStore } from "../lib/store";
 
 const buttonClass =
   "studio-btn h-8 px-2.5 text-xs tracking-[0.01em] disabled:cursor-not-allowed disabled:opacity-40";
 const dangerButtonClass = `${buttonClass} studio-btn-danger`;
-
-type PathDrawingContext = Pick<CanvasRenderingContext2D, "moveTo" | "lineTo" | "quadraticCurveTo">;
-
-function drawPanelPath(context: PathDrawingContext, panel: Pick<Panel, "width" | "height" | "shape" | "borderRadius">, inset = 0) {
-  const points = getInsetPanelLocalPoints(panel, inset);
-  drawRoundedPolygonPath(context, points, Math.max(0, panel.borderRadius - inset));
-}
 
 function PreviewPanelFill({ panel }: { panel: Panel }) {
   return (
@@ -63,20 +57,13 @@ function PreviewPanelImage({ panel }: { panel: Panel }) {
     return null;
   }
 
-  const clipPoints = getInsetPanelLocalPoints(panel, panel.gap);
-  const clipBounds = getPolygonBounds(clipPoints);
-  const innerWidth = clipBounds.width;
-  const innerHeight = clipBounds.height;
-
-  const crop = panel.image.crop;
-  const sourceWidth = crop?.width ?? panel.image.naturalWidth ?? image.width;
-  const sourceHeight = crop?.height ?? panel.image.naturalHeight ?? image.height;
-  const coverScale = Math.max(innerWidth / Math.max(1, sourceWidth), innerHeight / Math.max(1, sourceHeight));
-  const drawScale = coverScale * (crop?.scale ?? 1);
-  const drawWidth = sourceWidth * drawScale;
-  const drawHeight = sourceHeight * drawScale;
-  const offsetX = clipBounds.minX + (innerWidth - drawWidth) / 2;
-  const offsetY = clipBounds.minY + (innerHeight - drawHeight) / 2;
+  const imageLayout = getPanelImageLayout(panel, {
+    width: image.width,
+    height: image.height
+  });
+  if (!imageLayout) {
+    return null;
+  }
 
   return (
     <Group
@@ -89,20 +76,11 @@ function PreviewPanelImage({ panel }: { panel: Panel }) {
     >
       <KonvaImage
         image={image}
-        x={offsetX}
-        y={offsetY}
-        width={drawWidth}
-        height={drawHeight}
-        crop={
-          crop
-            ? {
-                x: crop.x,
-                y: crop.y,
-                width: crop.width,
-                height: crop.height
-              }
-            : undefined
-        }
+        x={imageLayout.offsetX}
+        y={imageLayout.offsetY}
+        width={imageLayout.drawWidth}
+        height={imageLayout.drawHeight}
+        crop={imageLayout.cropRect}
         listening={false}
       />
     </Group>

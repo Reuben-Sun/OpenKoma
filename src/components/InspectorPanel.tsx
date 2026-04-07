@@ -6,10 +6,22 @@ import {
   getPanelImageClipPoints,
   normalizePanelRotation,
   normalizePanelShape,
+  Point,
   PANEL_SHAPE_MAX_RATIO,
   PANEL_SHAPE_MIN_RATIO,
   RECT_PANEL_SHAPE
 } from "../lib/panelGeometry";
+import {
+  clampNumber,
+  createCenteredVisibleCropWithRatio,
+  createStoredCropDraft,
+  CropDraft,
+  expandCropAroundCenter,
+  getVisibleCropFromStoredCrop,
+  moveVisibleCropWithinBounds,
+  ResizeEdge,
+  resizeVisibleCropFromEdgeWithRatio
+} from "../lib/cropGeometry";
 import { getActivePage, useEditorStore } from "../lib/store";
 
 const containerClass =
@@ -27,20 +39,6 @@ const colorInputClass = "h-9 w-20 cursor-pointer rounded-lg border border-[var(-
 const cropOverlaySvgClass = "absolute inset-0 block h-full w-full overflow-visible";
 const cropHandleClass =
   "absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-100 bg-cyan-400 shadow-[0_0_0_1px_rgba(34,211,238,0.35)]";
-
-type CropDraft = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
-
-type Point = {
-  x: number;
-  y: number;
-};
-
-type ResizeEdge = "left" | "right" | "top" | "bottom";
 
 type CropDragState =
   | {
@@ -83,220 +81,6 @@ const CROP_EDGE_CONNECTIONS: { edge: ResizeEdge; startIndex: number; endIndex: n
   { edge: "left", startIndex: 3, endIndex: 0 }
 ];
 
-function clamp(value: number, min: number, max: number): number {
-  if (Number.isNaN(value)) {
-    return min;
-  }
-  return Math.min(max, Math.max(min, value));
-}
-
-function createCenteredCropWithRatio(naturalWidth: number, naturalHeight: number, ratio: number): CropDraft {
-  const safeRatio = Math.max(0.001, ratio);
-  if (naturalWidth / naturalHeight >= safeRatio) {
-    const height = naturalHeight;
-    const width = height * safeRatio;
-    return {
-      x: (naturalWidth - width) / 2,
-      y: 0,
-      width,
-      height
-    };
-  }
-
-  const width = naturalWidth;
-  const height = width / safeRatio;
-  return {
-    x: 0,
-    y: (naturalHeight - height) / 2,
-    width,
-    height
-  };
-}
-
-function getCropCenter(crop: CropDraft): Point {
-  return {
-    x: crop.x + crop.width / 2,
-    y: crop.y + crop.height / 2
-  };
-}
-
-function createCropFromCenter(centerX: number, centerY: number, width: number, height: number): CropDraft {
-  return {
-    x: centerX - width / 2,
-    y: centerY - height / 2,
-    width,
-    height
-  };
-}
-
-function shrinkCropAroundCenter(crop: CropDraft, zoom: number): CropDraft {
-  const safeZoom = clamp(zoom, 0.1, 4);
-  const width = crop.width / safeZoom;
-  const height = crop.height / safeZoom;
-  const center = getCropCenter(crop);
-  return createCropFromCenter(center.x, center.y, width, height);
-}
-
-function expandCropAroundCenter(crop: CropDraft, zoom: number): CropDraft {
-  const safeZoom = clamp(zoom, 0.1, 4);
-  const width = crop.width * safeZoom;
-  const height = crop.height * safeZoom;
-  const center = getCropCenter(crop);
-  return createCropFromCenter(center.x, center.y, width, height);
-}
-
-function createCenteredVisibleCropWithRatio(
-  naturalWidth: number,
-  naturalHeight: number,
-  ratio: number,
-  zoom: number
-): CropDraft {
-  return shrinkCropAroundCenter(createCenteredCropWithRatio(naturalWidth, naturalHeight, ratio), zoom);
-}
-
-function getVisibleCropFromStoredCrop(
-  crop: CropDraft,
-  frameWidth: number,
-  frameHeight: number,
-  zoom: number
-): CropDraft {
-  const safeFrameWidth = Math.max(1, frameWidth);
-  const safeFrameHeight = Math.max(1, frameHeight);
-  const safeCropWidth = Math.max(1, crop.width);
-  const safeCropHeight = Math.max(1, crop.height);
-  const safeZoom = clamp(zoom, 1, 4);
-  const coverScale = Math.max(safeFrameWidth / safeCropWidth, safeFrameHeight / safeCropHeight);
-  const drawScale = coverScale * safeZoom;
-  const width = Math.min(safeCropWidth, safeFrameWidth / drawScale);
-  const height = Math.min(safeCropHeight, safeFrameHeight / drawScale);
-  const center = getCropCenter(crop);
-  return createCropFromCenter(center.x, center.y, width, height);
-}
-
-function normalizeVisibleCropToRatio(
-  crop: CropDraft,
-  naturalWidth: number,
-  naturalHeight: number,
-  ratio: number,
-  zoom: number
-): CropDraft {
-  const safeRatio = Math.max(0.001, ratio);
-  const safeZoom = clamp(zoom, 1, 4);
-  const center = getCropCenter(crop);
-  let width = Math.max(1, crop.width);
-  let height = Math.max(1, crop.height);
-
-  if (width / height >= safeRatio) {
-    height = width / safeRatio;
-  } else {
-    width = height * safeRatio;
-  }
-
-  const maxVisible = createCenteredVisibleCropWithRatio(naturalWidth, naturalHeight, safeRatio, safeZoom);
-  const fitScale = Math.min(1, maxVisible.width / width, maxVisible.height / height);
-  width = Math.max(1, width * fitScale);
-  height = Math.max(1, height * fitScale);
-
-  const clampedCenterX = clamp(center.x, (width * safeZoom) / 2, naturalWidth - (width * safeZoom) / 2);
-  const clampedCenterY = clamp(center.y, (height * safeZoom) / 2, naturalHeight - (height * safeZoom) / 2);
-  return createCropFromCenter(clampedCenterX, clampedCenterY, width, height);
-}
-
-function moveVisibleCropWithinBounds(
-  crop: CropDraft,
-  deltaX: number,
-  deltaY: number,
-  naturalWidth: number,
-  naturalHeight: number,
-  ratio: number,
-  zoom: number
-): CropDraft {
-  return normalizeVisibleCropToRatio(
-    {
-      x: crop.x + deltaX,
-      y: crop.y + deltaY,
-      width: crop.width,
-      height: crop.height
-    },
-    naturalWidth,
-    naturalHeight,
-    ratio,
-    zoom
-  );
-}
-
-function resizeVisibleCropFromEdgeWithRatio(
-  initial: CropDraft,
-  edge: ResizeEdge,
-  point: Point,
-  naturalWidth: number,
-  naturalHeight: number,
-  ratio: number,
-  zoom: number
-): CropDraft {
-  const safeRatio = Math.max(0.001, ratio);
-  const safeZoom = clamp(zoom, 1, 4);
-  const safeWidth = Math.max(1, naturalWidth);
-  const safeHeight = Math.max(1, naturalHeight);
-  const maxVisible = createCenteredVisibleCropWithRatio(safeWidth, safeHeight, safeRatio, safeZoom);
-
-  if (edge === "left" || edge === "right") {
-    const anchorX = edge === "left" ? initial.x + initial.width : initial.x;
-    const centerY = initial.y + initial.height / 2;
-    const maxHeightByVertical = (Math.min(centerY, safeHeight - centerY) * 2) / safeZoom;
-    const maxWidthByVertical = maxHeightByVertical * safeRatio;
-    const maxWidthByNearHorizontal = (2 * (edge === "left" ? anchorX : safeWidth - anchorX)) / (safeZoom + 1);
-    const maxWidthByFarHorizontal =
-      safeZoom > 1
-        ? (2 * (edge === "left" ? safeWidth - anchorX : anchorX)) / (safeZoom - 1)
-        : Number.POSITIVE_INFINITY;
-    const maxWidth = Math.max(1, Math.min(maxVisible.width, maxWidthByVertical, maxWidthByNearHorizontal, maxWidthByFarHorizontal));
-
-    let width = edge === "left" ? anchorX - point.x : point.x - anchorX;
-    width = clamp(width, 1, maxWidth);
-    const height = width / safeRatio;
-    return normalizeVisibleCropToRatio(
-      {
-        x: edge === "left" ? anchorX - width : anchorX,
-        y: centerY - height / 2,
-        width,
-        height
-      },
-      safeWidth,
-      safeHeight,
-      safeRatio,
-      safeZoom
-    );
-  }
-
-  const anchorY = edge === "top" ? initial.y + initial.height : initial.y;
-  const centerX = initial.x + initial.width / 2;
-  const maxWidthByHorizontal = (Math.min(centerX, safeWidth - centerX) * 2) / safeZoom;
-  const maxHeightByHorizontal = maxWidthByHorizontal / safeRatio;
-  const maxHeightByNearVertical = (2 * (edge === "top" ? anchorY : safeHeight - anchorY)) / (safeZoom + 1);
-  const maxHeightByFarVertical =
-    safeZoom > 1
-      ? (2 * (edge === "top" ? safeHeight - anchorY : anchorY)) / (safeZoom - 1)
-      : Number.POSITIVE_INFINITY;
-  const maxHeight = Math.max(1, Math.min(maxVisible.height, maxHeightByHorizontal, maxHeightByNearVertical, maxHeightByFarVertical));
-
-  let height = edge === "top" ? anchorY - point.y : point.y - anchorY;
-  height = clamp(height, 1, maxHeight);
-  const width = height * safeRatio;
-  return normalizeVisibleCropToRatio(
-    {
-      x: centerX - width / 2,
-      y: edge === "top" ? anchorY - height : anchorY,
-      width,
-      height
-    },
-    safeWidth,
-    safeHeight,
-    safeRatio,
-    safeZoom
-  );
-}
-
 function toNaturalPoint(
   event: PointerEvent<Element>,
   overlayElement: HTMLDivElement | null,
@@ -313,8 +97,8 @@ function toNaturalPoint(
 
   const rect = overlayElement.getBoundingClientRect();
   return {
-    x: clamp((event.clientX - rect.left) / scale, 0, naturalWidth),
-    y: clamp((event.clientY - rect.top) / scale, 0, naturalHeight)
+    x: clampNumber((event.clientX - rect.left) / scale, 0, naturalWidth),
+    y: clampNumber((event.clientY - rect.top) / scale, 0, naturalHeight)
   };
 }
 
@@ -391,24 +175,6 @@ function buildCropEdges(normalizedPoints: Point[]): CropEdge[] {
       mid: getEdgeMidpoint(start, end)
     };
   });
-}
-
-function createStoredCropDraft(crop: CropConfig | undefined, naturalWidth: number, naturalHeight: number): CropDraft {
-  if (crop) {
-    return {
-      x: crop.x,
-      y: crop.y,
-      width: crop.width,
-      height: crop.height
-    };
-  }
-
-  return {
-    x: 0,
-    y: 0,
-    width: naturalWidth,
-    height: naturalHeight
-  };
 }
 
 function getCropDisplaySize(naturalWidth: number, naturalHeight: number) {
@@ -632,7 +398,7 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
 
   const naturalWidth = panel.image?.naturalWidth ?? panel.width;
   const naturalHeight = panel.image?.naturalHeight ?? panel.height;
-  const cropZoom = clamp(panel.image?.crop?.scale ?? 1, 0.1, 4);
+  const cropZoom = clampNumber(panel.image?.crop?.scale ?? 1, 0.1, 4);
   const visibleCropZoom = Math.max(1, cropZoom);
   const cropShapePreview = useMemo(() => getCropShapePreview(panel), [panel.gap, panel.height, panel.shape, panel.width]);
   const frameRatio = cropShapePreview.clipBounds.width / cropShapePreview.clipBounds.height;

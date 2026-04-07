@@ -4,10 +4,12 @@ export type Point = {
   x: number;
   y: number;
 };
+export type PanelShapeKey = keyof PanelShape;
 
 const MIN_PANEL_EDGE_WIDTH = 24;
 export const PANEL_SHAPE_MIN_RATIO = -1;
 export const PANEL_SHAPE_MAX_RATIO = 2;
+export const PANEL_SHAPE_HANDLE_KEYS: PanelShapeKey[] = ["topLeft", "topRight", "bottomRight", "bottomLeft"];
 
 export const RECT_PANEL_SHAPE: PanelShape = {
   topLeft: 0,
@@ -127,6 +129,59 @@ export function getPanelLocalPoints(panel: Pick<Panel, "width" | "height" | "sha
 
 export function getPanelPointArray(panel: Pick<Panel, "width" | "height" | "shape">): number[] {
   return getPanelLocalPoints(panel).flatMap((point) => [point.x, point.y]);
+}
+
+export function getPanelShapeHandlePoint(
+  panel: Pick<Panel, "width" | "height" | "shape">,
+  key: PanelShapeKey
+): Point {
+  const shape = normalizePanelShape(panel.shape, panel.width);
+  return {
+    x: shape[key] * panel.width,
+    y: key.startsWith("top") ? 0 : panel.height
+  };
+}
+
+export function getPanelShapeGuideLines(panel: Pick<Panel, "width" | "height" | "shape">) {
+  const [topLeft, topRight, bottomRight, bottomLeft] = getPanelLocalPoints(panel);
+  return {
+    top: [topLeft.x, topLeft.y, topRight.x, topRight.y],
+    bottom: [bottomLeft.x, bottomLeft.y, bottomRight.x, bottomRight.y]
+  };
+}
+
+export function clampPanelShapeHandleX(
+  shape: PanelShape,
+  key: PanelShapeKey,
+  width: number,
+  nextX: number
+): number {
+  const minSpan = width * Math.min(0.96, MIN_PANEL_EDGE_WIDTH / Math.max(24, width));
+  const minX = width * PANEL_SHAPE_MIN_RATIO;
+  const maxX = width * PANEL_SHAPE_MAX_RATIO;
+
+  if (key === "topLeft") {
+    return Math.min(Math.max(minX, nextX), width * shape.topRight - minSpan);
+  }
+  if (key === "topRight") {
+    return Math.max(width * shape.topLeft + minSpan, Math.min(maxX, nextX));
+  }
+  if (key === "bottomLeft") {
+    return Math.min(Math.max(minX, nextX), width * shape.bottomRight - minSpan);
+  }
+
+  return Math.max(width * shape.bottomLeft + minSpan, Math.min(maxX, nextX));
+}
+
+export function updatePanelShapeHandle(shape: PanelShape, key: PanelShapeKey, width: number, x: number): PanelShape {
+  const clampedX = clampPanelShapeHandleX(shape, key, width, x);
+  return normalizePanelShape(
+    {
+      ...shape,
+      [key]: clampedX / Math.max(1, width)
+    },
+    width
+  );
 }
 
 export function getInsetPanelLocalPoints(
