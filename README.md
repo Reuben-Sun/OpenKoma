@@ -1,119 +1,69 @@
 # OpenKoma
 
-> Local-first comic layout editor for skewed panels, non-destructive image crop, and multi-page export.
+## 项目简介
 
-[English](./README.md) | [简体中文](./README.zh-CN.md)
+OpenKoma 是一个专注于漫画排版的编辑器，用户可以将绘制好的图像使用该工具进行分镜布局、裁剪、拼接、标注文本。
 
-## Overview
+项目基于前端技术，非常轻量
 
-OpenKoma is a pure local editor for comic page layout. It focuses on the parts of production that need to feel reliable every day: panel composition, local image placement, manual crop, speech bubbles, multi-page management, and reversible editing history.
+## 效果展示
 
-The app runs entirely on the client side. There is no bundled backend, no external image service, and no account or API setup.
+### 漫画布局
 
-## Core Capabilities
+![sub](docs/sub.jpg)
 
-- True skewed panels: supports rectangles, parallelograms, and trapezoids instead of only rotated rectangles.
-- Non-destructive crop: imported images keep their original data while crop parameters control rendering.
-- Crop editor that matches panel geometry: the manual crop overlay follows the edited skewed panel shape.
-- Multi-page workflow: create, reorder, duplicate structure through splitting tools, and export in page order.
-- Incremental undo/redo: editing history is stored as forward/backward JSON patches.
-- Local-first persistence: save to a folder when File System Access is available, or export/import a single `.openkoma.json` file.
+### 半透明图片
 
-## Editor Features
+![trans](docs/trans.jpg)
 
-### Layout
+### 斜切分镜
 
-- A4, A3, and custom canvas sizes
-- Grid split for the full canvas
-- Secondary split for the selected panel
-- Drag-to-create manual panel mode
-- Optional size snapping to multiples of 16
+![skew](docs/skew.jpg)
 
-### Panel and Bubble Editing
+![split](docs/split.jpg)
 
-- Select, move, and resize panels and bubbles on canvas
-- Corner-handle skew editing for panel shapes
-- Batch style tools for border radius and border width
-- Speech bubble creation and text editing
+### 文字
 
-### Image Workflow
+![text](docs/text.jpg)
 
-- Import images from your computer only
-- Manual crop editor for panel images
-- Cover-style display without stretch
-- Original image remains untouched after crop edits
+### 编辑器界面
 
-### Export and Save
+![edit](docs/edit.jpg)
 
-- Export current page as PNG
-- Export all pages as a PDF
-- Save/load through a chosen local directory
-- Fallback project exchange via `.openkoma.json`
+## 核心能力
 
-## Getting Started
+- 真正的斜切分镜：支持矩形、平行四边形、梯形，而不只是旋转矩形。
+- 非破坏裁剪：导入原图始终保留，显示结果只由裁剪参数驱动。
+- 与分镜形状一致的裁剪编辑：手动裁剪层会跟随分镜的斜切几何形状。
+- 多页面工作流：可创建页面、调整顺序，并按页面顺序导出。
+- 增量撤销重做：编辑历史以 forward/backward JSON patch 的形式记录。
+- 本地优先持久化：支持直接保存到目录，也支持导出/导入单个 `.openkoma.json` 文件。
+- 图像导出与PDF导出
+- 历史记录与Undo/Redo
 
-### Requirements
+## 快速开始
+
+### 环境要求
 
 - Node.js 18+
 - npm 9+
 
-### Development
+### 开发启动
 
 ```bash
 npm install
 npm run dev
 ```
 
-Default URL: `http://localhost:5173`
+默认地址：`http://localhost:5173`
 
-### Production Build
+## 开发路线图
 
-```bash
-npm run build
-```
+- PSD 分层导出
+- 多选与批量对齐工具
+- 更多版式模板与排版控制
+- 更完整的印刷导出预设
 
-## Local Project Format
+## 协议
 
-When directory access is available, OpenKoma writes project data into the folder you choose:
-
-- `project.json`: layout and editor state
-- `history.log`: undo/redo history and notices
-- `images/*`: imported local assets copied into the project folder
-
-When directory access is not available, OpenKoma falls back to a single exported `.openkoma.json` file and embeds image data when possible.
-
-Remote image URLs are not part of the supported workflow anymore. If an old project still contains external image links, OpenKoma may warn that those assets cannot be materialized during save.
-
-## Typical Workflow
-
-1. Set the page size and create panels with grid split or manual drawing.
-2. Refine panel shapes by dragging skew handles into parallelograms or trapezoids.
-3. Import local images for selected panels.
-4. Open the manual crop editor and adjust the visible area non-destructively.
-5. Add speech bubbles, then save the project or export PNG/PDF.
-
-## Keyboard Shortcuts
-
-- `Cmd/Ctrl + Z`: undo
-- `Cmd/Ctrl + Shift + Z` or `Ctrl + Y`: redo
-- `Delete` or `Backspace`: delete selected panel or bubble
-- `Esc`: close the active toolbar drawer
-
-## Tech Stack
-
-- React + TypeScript
-- Zustand
-- Konva / React Konva
-- Vite
-- Radix Themes
-
-## Roadmap
-
-- PSD layered export
-- Multi-select and batch alignment tools
-- More layout templates and typography controls
-- More print-oriented export presets
-
-## License
-
-Apache License 2.0. See [LICENSE](./LICENSE).
+Apache License 2.0，详见 [LICENSE](./LICENSE)。
