@@ -34,6 +34,17 @@ export type CanvasEditorHandle = {
 };
 
 const ROTATION_SNAP_ANGLES = Array.from({ length: 72 }, (_value, index) => index * 5);
+const PANEL_TRANSFORMER_ANCHORS: string[] = ["top-left", "top-right", "bottom-right", "bottom-left"];
+const DEFAULT_TRANSFORMER_ANCHORS: string[] = [
+  "top-left",
+  "top-center",
+  "top-right",
+  "middle-right",
+  "middle-left",
+  "bottom-left",
+  "bottom-center",
+  "bottom-right"
+];
 
 function formatFilename(projectName: string, ext: "png" | "pdf") {
   const safe = projectName.trim().replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, "_") || "openkoma";
@@ -77,6 +88,7 @@ const EDGE_HANDLE_HIT_STROKE_WIDTH = 42;
 const EDGE_HANDLE_CORNER_RADIUS = 8;
 const SKEW_HANDLE_COLOR = "#2563eb";
 const SKEW_GUIDE_COLOR = "rgba(37, 99, 235, 0.35)";
+const TRANSFORMER_ANCHOR_SIZE = 18;
 
 function PanelFillShape({ panel }: { panel: Panel }) {
   return (
@@ -403,6 +415,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
   const liveSnapEnabled =
     snapSizeTo16 &&
     (selection?.kind !== "panel" || !selectedPanel || Math.abs(normalizePanelRotation(selectedPanel.rotation)) < 0.001);
+  const enabledTransformerAnchors = selection?.kind === "panel" ? PANEL_TRANSFORMER_ANCHORS : DEFAULT_TRANSFORMER_ANCHORS;
 
   useEffect(() => {
     if (!selection || selection.kind !== "panel") {
@@ -827,6 +840,10 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
                 name="selection-transformer"
                 rotateEnabled={selection?.kind === "panel"}
                 flipEnabled={false}
+                enabledAnchors={enabledTransformerAnchors}
+                anchorSize={TRANSFORMER_ANCHOR_SIZE}
+                keepRatio={false}
+                shiftBehavior="default"
                 borderStroke="#2563eb"
                 anchorStroke="#2563eb"
                 anchorFill="#bfdbfe"
