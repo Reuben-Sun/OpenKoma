@@ -44,7 +44,7 @@ const DEFAULT_TRANSFORMER_ANCHORS: string[] = [
   "bottom-center",
   "bottom-right"
 ];
-const CORNER_TRANSFORMER_ANCHORS = new Set(["top-left", "top-right", "bottom-right", "bottom-left"]);
+const CORNER_TRANSFORMER_ANCHORS = new Set(["top-right", "bottom-right", "bottom-left"]);
 
 function formatFilename(projectName: string, ext: "png" | "pdf") {
   const safe = projectName.trim().replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, "_") || "openkoma";
@@ -92,6 +92,13 @@ const TRANSFORMER_ANCHOR_SIZE = 18;
 
 function isCornerTransformerAnchor(anchor: string | null): boolean {
   return Boolean(anchor && CORNER_TRANSFORMER_ANCHORS.has(anchor));
+}
+
+function styleTransformerAnchor(anchor: Konva.Rect) {
+  if (anchor.hasName("top-left")) {
+    anchor.visible(false);
+    anchor.listening(false);
+  }
 }
 
 function PanelFillShape({ panel }: { panel: Panel }) {
@@ -894,6 +901,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
                 anchorSize={TRANSFORMER_ANCHOR_SIZE}
                 keepRatio={false}
                 shiftBehavior="none"
+                anchorStyleFunc={styleTransformerAnchor}
                 borderStroke="#2563eb"
                 anchorStroke="#2563eb"
                 anchorFill="#bfdbfe"
