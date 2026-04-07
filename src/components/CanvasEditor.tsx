@@ -403,6 +403,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
   const stageRef = useRef<Konva.Stage | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const [zoom, setZoom] = useState(0.27);
+  const [isExporting, setIsExporting] = useState(false);
 
   const [draftRect, setDraftRect] = useState<DraftRect | null>(null);
   const [draftStart, setDraftStart] = useState<{ x: number; y: number } | null>(null);
@@ -508,42 +509,47 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
     transformer.getLayer()?.batchDraw();
   }, [selection?.kind, selectedNodeId, activePage.id, activePage.panels, activePage.bubbles]);
 
-  const captureStageDataUrl = (exportWidth: number, exportHeight: number) => {
+  const captureStageDataUrl = async (exportWidth: number, exportHeight: number) => {
     const stage = stageRef.current;
     if (!stage) {
       throw new Error("画布未初始化");
     }
+
+    setIsExporting(true);
+    await waitForStageRefresh();
 
     const prevWidth = stage.width();
     const prevHeight = stage.height();
     const prevScale = stage.scale();
     const prevNodes = transformerRef.current ? [...transformerRef.current.nodes()] : [];
 
-    if (transformerRef.current) {
-      transformerRef.current.nodes([]);
+    try {
+      if (transformerRef.current) {
+        transformerRef.current.nodes([]);
+      }
+
+      stage.width(exportWidth);
+      stage.height(exportHeight);
+      stage.scale({ x: 1, y: 1 });
+      stage.batchDraw();
+
+      return stage.toDataURL({
+        mimeType: "image/png",
+        pixelRatio: 2
+      });
+    } finally {
+      stage.width(prevWidth);
+      stage.height(prevHeight);
+      stage.scale(prevScale);
+
+      if (transformerRef.current) {
+        transformerRef.current.nodes(prevNodes);
+        transformerRef.current.getLayer()?.batchDraw();
+      }
+
+      stage.batchDraw();
+      setIsExporting(false);
     }
-
-    stage.width(exportWidth);
-    stage.height(exportHeight);
-    stage.scale({ x: 1, y: 1 });
-    stage.batchDraw();
-
-    const dataUrl = stage.toDataURL({
-      mimeType: "image/png",
-      pixelRatio: 2
-    });
-
-    stage.width(prevWidth);
-    stage.height(prevHeight);
-    stage.scale(prevScale);
-
-    if (transformerRef.current) {
-      transformerRef.current.nodes(prevNodes);
-      transformerRef.current.getLayer()?.batchDraw();
-    }
-
-    stage.batchDraw();
-    return dataUrl;
   };
 
   useImperativeHandle(
@@ -551,7 +557,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
     () => ({
       exportPng: async () => {
         try {
-          const dataUrl = captureStageDataUrl(activePage.canvas.width, activePage.canvas.height);
+          const dataUrl = await captureStageDataUrl(activePage.canvas.width, activePage.canvas.height);
           const filename = formatFilename(project.name, "png");
           triggerDownload(dataUrl, filename);
           setNotice("PNG 导出完成");
@@ -583,7 +589,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
               await waitForStageRefresh();
             }
 
-            const dataUrl = captureStageDataUrl(page.canvas.width, page.canvas.height);
+            const dataUrl = await captureStageDataUrl(page.canvas.width, page.canvas.height);
             const orientation = getOrientation(page.canvas.width, page.canvas.height);
 
             if (!doc) {
@@ -747,7 +753,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
                 <Rect name="canvas-bg" x={0} y={0} width={activePage.canvas.width} height={activePage.canvas.height} fill="#f8fafc" />
 
               {activePage.panels.map((panel) => {
-                const selected = selection?.kind === "panel" && selection.id === panel.id;
+                const selected = !isExporting && selection?.kind === "panel" && selection.id === panel.id;
                 const displayPanel =
                   panelDraft?.panelId === panel.id
                     ? {
@@ -833,7 +839,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
               })}
 
               {activePage.bubbles.map((bubble) => {
-                const selected = selection?.kind === "bubble" && selection.id === bubble.id;
+                const selected = !isExporting && selection?.kind === "bubble" && selection.id === bubble.id;
                 return (
                   <Group
                     key={bubble.id}
@@ -903,14 +909,14 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
               <Transformer
                 ref={transformerRef}
                 name="selection-transformer"
-                rotateEnabled={selection?.kind === "panel"}
-                resizeEnabled={selection?.kind === "bubble"}
+                rotateEnabled={!isExporting && selection?.kind === "panel"}
+                resizeEnabled={!isExporting && selection?.kind === "bubble"}
                 flipEnabled={false}
-                enabledAnchors={selection?.kind === "bubble" ? BUBBLE_TRANSFORMER_ANCHORS : []}
+                enabledAnchors={!isExporting && selection?.kind === "bubble" ? BUBBLE_TRANSFORMER_ANCHORS : []}
                 anchorSize={TRANSFORMER_ANCHOR_SIZE}
                 keepRatio={false}
                 anchorStyleFunc={styleTransformerAnchor}
-                borderEnabled={selection?.kind === "bubble"}
+                borderEnabled={!isExporting && selection?.kind === "bubble"}
                 borderStroke="#2563eb"
                 anchorStroke="#2563eb"
                 anchorFill="#bfdbfe"
