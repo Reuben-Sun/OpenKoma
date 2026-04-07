@@ -1,5 +1,15 @@
 import { ChangeEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Bubble, CropConfig, Panel } from "../types";
+import { createPortal } from "react-dom";
+import { Bubble, CropConfig, Panel, PanelShape } from "../types";
+import {
+  getPanelImageClipBounds,
+  getPanelImageClipPoints,
+  normalizePanelRotation,
+  normalizePanelShape,
+  PANEL_SHAPE_MAX_RATIO,
+  PANEL_SHAPE_MIN_RATIO,
+  RECT_PANEL_SHAPE
+} from "../lib/panelGeometry";
 import { getActivePage, useEditorStore } from "../lib/store";
 
 const containerClass =
@@ -73,17 +83,78 @@ function createCenteredCropWithRatio(naturalWidth: number, naturalHeight: number
   };
 }
 
-function normalizeCropToRatio(
+function getCropCenter(crop: CropDraft): Point {
+  return {
+    x: crop.x + crop.width / 2,
+    y: crop.y + crop.height / 2
+  };
+}
+
+function createCropFromCenter(centerX: number, centerY: number, width: number, height: number): CropDraft {
+  return {
+    x: centerX - width / 2,
+    y: centerY - height / 2,
+    width,
+    height
+  };
+}
+
+function shrinkCropAroundCenter(crop: CropDraft, zoom: number): CropDraft {
+  const safeZoom = clamp(zoom, 0.1, 4);
+  const width = crop.width / safeZoom;
+  const height = crop.height / safeZoom;
+  const center = getCropCenter(crop);
+  return createCropFromCenter(center.x, center.y, width, height);
+}
+
+function expandCropAroundCenter(crop: CropDraft, zoom: number): CropDraft {
+  const safeZoom = clamp(zoom, 0.1, 4);
+  const width = crop.width * safeZoom;
+  const height = crop.height * safeZoom;
+  const center = getCropCenter(crop);
+  return createCropFromCenter(center.x, center.y, width, height);
+}
+
+function createCenteredVisibleCropWithRatio(
+  naturalWidth: number,
+  naturalHeight: number,
+  ratio: number,
+  zoom: number
+): CropDraft {
+  return shrinkCropAroundCenter(createCenteredCropWithRatio(naturalWidth, naturalHeight, ratio), zoom);
+}
+
+function getVisibleCropFromStoredCrop(
+  crop: CropDraft,
+  frameWidth: number,
+  frameHeight: number,
+  zoom: number
+): CropDraft {
+  const safeFrameWidth = Math.max(1, frameWidth);
+  const safeFrameHeight = Math.max(1, frameHeight);
+  const safeCropWidth = Math.max(1, crop.width);
+  const safeCropHeight = Math.max(1, crop.height);
+  const safeZoom = clamp(zoom, 1, 4);
+  const coverScale = Math.max(safeFrameWidth / safeCropWidth, safeFrameHeight / safeCropHeight);
+  const drawScale = coverScale * safeZoom;
+  const width = Math.min(safeCropWidth, safeFrameWidth / drawScale);
+  const height = Math.min(safeCropHeight, safeFrameHeight / drawScale);
+  const center = getCropCenter(crop);
+  return createCropFromCenter(center.x, center.y, width, height);
+}
+
+function normalizeVisibleCropToRatio(
   crop: CropDraft,
   naturalWidth: number,
   naturalHeight: number,
-  ratio: number
+  ratio: number,
+  zoom: number
 ): CropDraft {
   const safeRatio = Math.max(0.001, ratio);
+  const safeZoom = clamp(zoom, 1, 4);
+  const center = getCropCenter(crop);
   let width = Math.max(1, crop.width);
   let height = Math.max(1, crop.height);
-  const centerX = crop.x + width / 2;
-  const centerY = crop.y + height / 2;
 
   if (width / height >= safeRatio) {
     height = width / safeRatio;
@@ -91,90 +162,113 @@ function normalizeCropToRatio(
     width = height * safeRatio;
   }
 
-  const fitScale = Math.min(1, naturalWidth / width, naturalHeight / height);
+  const maxVisible = createCenteredVisibleCropWithRatio(naturalWidth, naturalHeight, safeRatio, safeZoom);
+  const fitScale = Math.min(1, maxVisible.width / width, maxVisible.height / height);
   width = Math.max(1, width * fitScale);
   height = Math.max(1, height * fitScale);
 
-  const x = clamp(centerX - width / 2, 0, naturalWidth - width);
-  const y = clamp(centerY - height / 2, 0, naturalHeight - height);
-  return {
-    x,
-    y,
-    width,
-    height
-  };
+  const clampedCenterX = clamp(center.x, (width * safeZoom) / 2, naturalWidth - (width * safeZoom) / 2);
+  const clampedCenterY = clamp(center.y, (height * safeZoom) / 2, naturalHeight - (height * safeZoom) / 2);
+  return createCropFromCenter(clampedCenterX, clampedCenterY, width, height);
 }
 
-function moveCropWithinBounds(
+function moveVisibleCropWithinBounds(
   crop: CropDraft,
   deltaX: number,
   deltaY: number,
   naturalWidth: number,
-  naturalHeight: number
+  naturalHeight: number,
+  ratio: number,
+  zoom: number
 ): CropDraft {
-  return {
-    x: clamp(crop.x + deltaX, 0, Math.max(0, naturalWidth - crop.width)),
-    y: clamp(crop.y + deltaY, 0, Math.max(0, naturalHeight - crop.height)),
-    width: crop.width,
-    height: crop.height
-  };
+  return normalizeVisibleCropToRatio(
+    {
+      x: crop.x + deltaX,
+      y: crop.y + deltaY,
+      width: crop.width,
+      height: crop.height
+    },
+    naturalWidth,
+    naturalHeight,
+    ratio,
+    zoom
+  );
 }
 
-function resizeCropFromEdgeWithRatio(
+function resizeVisibleCropFromEdgeWithRatio(
   initial: CropDraft,
   edge: ResizeEdge,
   point: Point,
   naturalWidth: number,
   naturalHeight: number,
-  ratio: number
+  ratio: number,
+  zoom: number
 ): CropDraft {
   const safeRatio = Math.max(0.001, ratio);
+  const safeZoom = clamp(zoom, 1, 4);
   const safeWidth = Math.max(1, naturalWidth);
   const safeHeight = Math.max(1, naturalHeight);
+  const maxVisible = createCenteredVisibleCropWithRatio(safeWidth, safeHeight, safeRatio, safeZoom);
 
   if (edge === "left" || edge === "right") {
     const anchorX = edge === "left" ? initial.x + initial.width : initial.x;
     const centerY = initial.y + initial.height / 2;
-    const maxWidthByHorizontal = edge === "left" ? anchorX : safeWidth - anchorX;
-    const maxHalfHeight = Math.min(centerY, safeHeight - centerY);
-    const maxWidthByVertical = maxHalfHeight * 2 * safeRatio;
-    const maxWidth = Math.max(1, Math.min(maxWidthByHorizontal, maxWidthByVertical));
+    const maxHeightByVertical = (Math.min(centerY, safeHeight - centerY) * 2) / safeZoom;
+    const maxWidthByVertical = maxHeightByVertical * safeRatio;
+    const maxWidthByNearHorizontal = (2 * (edge === "left" ? anchorX : safeWidth - anchorX)) / (safeZoom + 1);
+    const maxWidthByFarHorizontal =
+      safeZoom > 1
+        ? (2 * (edge === "left" ? safeWidth - anchorX : anchorX)) / (safeZoom - 1)
+        : Number.POSITIVE_INFINITY;
+    const maxWidth = Math.max(1, Math.min(maxVisible.width, maxWidthByVertical, maxWidthByNearHorizontal, maxWidthByFarHorizontal));
 
     let width = edge === "left" ? anchorX - point.x : point.x - anchorX;
     width = clamp(width, 1, maxWidth);
     const height = width / safeRatio;
-    const x = edge === "left" ? anchorX - width : anchorX;
-    const y = clamp(centerY - height / 2, 0, Math.max(0, safeHeight - height));
-    return {
-      x: clamp(x, 0, Math.max(0, safeWidth - width)),
-      y,
-      width,
-      height
-    };
+    return normalizeVisibleCropToRatio(
+      {
+        x: edge === "left" ? anchorX - width : anchorX,
+        y: centerY - height / 2,
+        width,
+        height
+      },
+      safeWidth,
+      safeHeight,
+      safeRatio,
+      safeZoom
+    );
   }
 
   const anchorY = edge === "top" ? initial.y + initial.height : initial.y;
   const centerX = initial.x + initial.width / 2;
-  const maxHeightByVertical = edge === "top" ? anchorY : safeHeight - anchorY;
-  const maxHalfWidth = Math.min(centerX, safeWidth - centerX);
-  const maxHeightByHorizontal = (maxHalfWidth * 2) / safeRatio;
-  const maxHeight = Math.max(1, Math.min(maxHeightByVertical, maxHeightByHorizontal));
+  const maxWidthByHorizontal = (Math.min(centerX, safeWidth - centerX) * 2) / safeZoom;
+  const maxHeightByHorizontal = maxWidthByHorizontal / safeRatio;
+  const maxHeightByNearVertical = (2 * (edge === "top" ? anchorY : safeHeight - anchorY)) / (safeZoom + 1);
+  const maxHeightByFarVertical =
+    safeZoom > 1
+      ? (2 * (edge === "top" ? safeHeight - anchorY : anchorY)) / (safeZoom - 1)
+      : Number.POSITIVE_INFINITY;
+  const maxHeight = Math.max(1, Math.min(maxVisible.height, maxHeightByHorizontal, maxHeightByNearVertical, maxHeightByFarVertical));
 
   let height = edge === "top" ? anchorY - point.y : point.y - anchorY;
   height = clamp(height, 1, maxHeight);
   const width = height * safeRatio;
-  const y = edge === "top" ? anchorY - height : anchorY;
-  const x = clamp(centerX - width / 2, 0, Math.max(0, safeWidth - width));
-  return {
-    x,
-    y: clamp(y, 0, Math.max(0, safeHeight - height)),
-    width,
-    height
-  };
+  return normalizeVisibleCropToRatio(
+    {
+      x: centerX - width / 2,
+      y: edge === "top" ? anchorY - height : anchorY,
+      width,
+      height
+    },
+    safeWidth,
+    safeHeight,
+    safeRatio,
+    safeZoom
+  );
 }
 
 function toNaturalPoint(
-  event: PointerEvent<HTMLElement>,
+  event: PointerEvent<Element>,
   overlayElement: HTMLDivElement | null,
   scale: number,
   naturalWidth: number,
@@ -194,7 +288,7 @@ function toNaturalPoint(
   };
 }
 
-function isMainPointer(event: PointerEvent<HTMLElement>) {
+function isMainPointer(event: PointerEvent<Element>) {
   if (event.pointerType === "touch") {
     return true;
   }
@@ -222,61 +316,21 @@ function getHandleCursor(edge: ResizeEdge) {
   return "ns-resize";
 }
 
-function cropHandleClass(edge: ResizeEdge) {
-  if (edge === "left") {
-    return "absolute bottom-2 left-0 top-2 w-4 -translate-x-1/2";
-  }
-  if (edge === "right") {
-    return "absolute bottom-2 right-0 top-2 w-4 translate-x-1/2";
-  }
-  if (edge === "top") {
-    return "absolute left-2 right-2 top-0 h-4 -translate-y-1/2";
-  }
-  return "absolute bottom-0 left-2 right-2 h-4 translate-y-1/2";
-}
-
-function cropHandleGuideClass(edge: ResizeEdge) {
-  if (edge === "left" || edge === "right") {
-    return "mx-auto h-full w-0.5 bg-cyan-200/90";
-  }
-  return "my-auto h-0.5 w-full bg-cyan-200/90";
-}
-
-function CropEdgeHandle({
-  edge,
-  onPointerDown
-}: {
-  edge: ResizeEdge;
-  onPointerDown: (event: PointerEvent<HTMLDivElement>) => void;
-}) {
-  return (
-    <div
-      className={`${cropHandleClass(edge)}`}
-      style={{ cursor: getHandleCursor(edge) }}
-      onPointerDown={(event) => {
-        event.stopPropagation();
-        onPointerDown(event);
-      }}
-    >
-      <div className={cropHandleGuideClass(edge)} />
-    </div>
-  );
-}
-
 function updateDraftForDragState(
   dragState: CropDragState,
   point: Point,
   naturalWidth: number,
   naturalHeight: number,
-  frameRatio: number
+  frameRatio: number,
+  zoom: number
 ): CropDraft {
   if (dragState.kind === "move") {
     const deltaX = point.x - dragState.startPoint.x;
     const deltaY = point.y - dragState.startPoint.y;
-    return moveCropWithinBounds(dragState.startCrop, deltaX, deltaY, naturalWidth, naturalHeight);
+    return moveVisibleCropWithinBounds(dragState.startCrop, deltaX, deltaY, naturalWidth, naturalHeight, frameRatio, zoom);
   }
 
-  return resizeCropFromEdgeWithRatio(dragState.startCrop, dragState.edge, point, naturalWidth, naturalHeight, frameRatio);
+  return resizeVisibleCropFromEdgeWithRatio(dragState.startCrop, dragState.edge, point, naturalWidth, naturalHeight, frameRatio, zoom);
 }
 
 function createScaledStyle(draft: CropDraft, scale: number) {
@@ -285,6 +339,21 @@ function createScaledStyle(draft: CropDraft, scale: number) {
     top: draft.y * scale,
     width: Math.max(1, draft.width * scale),
     height: Math.max(1, draft.height * scale)
+  };
+}
+
+function getCropShapePreview(panel: Pick<Panel, "width" | "height" | "shape" | "gap">) {
+  const clipPoints = getPanelImageClipPoints(panel);
+  const clipBounds = getPanelImageClipBounds(panel);
+  const normalizedPoints = clipPoints.map((point) => ({
+    x: (point.x - clipBounds.minX) / Math.max(1, clipBounds.width),
+    y: (point.y - clipBounds.minY) / Math.max(1, clipBounds.height)
+  }));
+
+  return {
+    clipBounds,
+    normalizedPoints,
+    svgPoints: normalizedPoints.map((point) => `${point.x * 100},${point.y * 100}`).join(" ")
   };
 }
 
@@ -319,6 +388,75 @@ function NumberField({
   );
 }
 
+function ShapePercentField({
+  label,
+  value,
+  onChange
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <NumberField
+      label={label}
+      value={Math.round(value * 100)}
+      min={Math.round(PANEL_SHAPE_MIN_RATIO * 100)}
+      max={Math.round(PANEL_SHAPE_MAX_RATIO * 100)}
+      step={1}
+      onChange={(nextValue) => onChange(nextValue / 100)}
+    />
+  );
+}
+
+type PanelShapePreset = {
+  label: string;
+  shape: PanelShape;
+};
+
+const PANEL_SHAPE_PRESETS: PanelShapePreset[] = [
+  {
+    label: "重置",
+    shape: RECT_PANEL_SHAPE
+  },
+  {
+    label: "平行 /",
+    shape: {
+      topLeft: 0.16,
+      topRight: 1,
+      bottomRight: 0.84,
+      bottomLeft: 0
+    }
+  },
+  {
+    label: "平行 \\",
+    shape: {
+      topLeft: 0,
+      topRight: 0.84,
+      bottomRight: 1,
+      bottomLeft: 0.16
+    }
+  },
+  {
+    label: "上窄",
+    shape: {
+      topLeft: 0.14,
+      topRight: 0.86,
+      bottomRight: 1,
+      bottomLeft: 0
+    }
+  },
+  {
+    label: "下窄",
+    shape: {
+      topLeft: 0,
+      topRight: 1,
+      bottomRight: 0.86,
+      bottomLeft: 0.14
+    }
+  }
+];
+
 function TextField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
     <label className="space-y-1">
@@ -334,28 +472,37 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
 
   const naturalWidth = panel.image?.naturalWidth ?? panel.width;
   const naturalHeight = panel.image?.naturalHeight ?? panel.height;
-  const frameWidth = Math.max(1, panel.width - panel.gap * 2);
-  const frameHeight = Math.max(1, panel.height - panel.gap * 2);
-  const frameRatio = frameWidth / frameHeight;
-  const frameRatioText = `${Math.round(frameWidth)}:${Math.round(frameHeight)}`;
-  const initialCrop: CropDraft = useMemo(
-    () => {
-      if (panel.image?.crop) {
-        return normalizeCropToRatio(
-          {
+  const cropZoom = clamp(panel.image?.crop?.scale ?? 1, 0.1, 4);
+  const visibleCropZoom = Math.max(1, cropZoom);
+  const cropShapePreview = useMemo(() => getCropShapePreview(panel), [panel.gap, panel.height, panel.shape, panel.width]);
+  const frameRatio = cropShapePreview.clipBounds.width / cropShapePreview.clipBounds.height;
+  const frameRatioText = `${Math.round(cropShapePreview.clipBounds.width)}:${Math.round(cropShapePreview.clipBounds.height)}`;
+  const storedCrop = useMemo(
+    () =>
+      panel.image?.crop
+        ? {
             x: panel.image.crop.x,
             y: panel.image.crop.y,
             width: panel.image.crop.width,
             height: panel.image.crop.height
+          }
+        : {
+            x: 0,
+            y: 0,
+            width: naturalWidth,
+            height: naturalHeight
           },
-          naturalWidth,
-          naturalHeight,
-          frameRatio
-        );
-      }
-      return createCenteredCropWithRatio(naturalWidth, naturalHeight, frameRatio);
-    },
-    [frameRatio, naturalHeight, naturalWidth, panel.image?.crop]
+    [naturalHeight, naturalWidth, panel.image?.crop?.height, panel.image?.crop?.width, panel.image?.crop?.x, panel.image?.crop?.y]
+  );
+  const initialCrop: CropDraft = useMemo(
+    () =>
+      getVisibleCropFromStoredCrop(
+        storedCrop,
+        cropShapePreview.clipBounds.width,
+        cropShapePreview.clipBounds.height,
+        visibleCropZoom
+      ),
+    [cropShapePreview.clipBounds.height, cropShapePreview.clipBounds.width, storedCrop, visibleCropZoom]
   );
 
   const [draft, setDraft] = useState<CropDraft>(initialCrop);
@@ -374,14 +521,59 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
     return null;
   }
 
+  if (typeof document === "undefined") {
+    return null;
+  }
+
   const scale = Math.min(1, 920 / naturalWidth, 560 / naturalHeight);
   const displayWidth = Math.max(1, Math.round(naturalWidth * scale));
   const displayHeight = Math.max(1, Math.round(naturalHeight * scale));
+  const draftStyle = createScaledStyle(draft, scale);
+  const storedPreview = Math.abs(visibleCropZoom - 1) > 0.001 ? expandCropAroundCenter(draft, visibleCropZoom) : null;
+  const storedPreviewStyle = storedPreview ? createScaledStyle(storedPreview, scale) : null;
+  const cropEdges: { edge: ResizeEdge; start: Point; end: Point; mid: Point }[] = [
+    {
+      edge: "top",
+      start: cropShapePreview.normalizedPoints[0],
+      end: cropShapePreview.normalizedPoints[1],
+      mid: {
+        x: (cropShapePreview.normalizedPoints[0].x + cropShapePreview.normalizedPoints[1].x) / 2,
+        y: (cropShapePreview.normalizedPoints[0].y + cropShapePreview.normalizedPoints[1].y) / 2
+      }
+    },
+    {
+      edge: "right",
+      start: cropShapePreview.normalizedPoints[1],
+      end: cropShapePreview.normalizedPoints[2],
+      mid: {
+        x: (cropShapePreview.normalizedPoints[1].x + cropShapePreview.normalizedPoints[2].x) / 2,
+        y: (cropShapePreview.normalizedPoints[1].y + cropShapePreview.normalizedPoints[2].y) / 2
+      }
+    },
+    {
+      edge: "bottom",
+      start: cropShapePreview.normalizedPoints[2],
+      end: cropShapePreview.normalizedPoints[3],
+      mid: {
+        x: (cropShapePreview.normalizedPoints[2].x + cropShapePreview.normalizedPoints[3].x) / 2,
+        y: (cropShapePreview.normalizedPoints[2].y + cropShapePreview.normalizedPoints[3].y) / 2
+      }
+    },
+    {
+      edge: "left",
+      start: cropShapePreview.normalizedPoints[3],
+      end: cropShapePreview.normalizedPoints[0],
+      mid: {
+        x: (cropShapePreview.normalizedPoints[3].x + cropShapePreview.normalizedPoints[0].x) / 2,
+        y: (cropShapePreview.normalizedPoints[3].y + cropShapePreview.normalizedPoints[0].y) / 2
+      }
+    }
+  ];
 
-  const toPoint = (event: PointerEvent<HTMLElement>) =>
+  const toPoint = (event: PointerEvent<Element>) =>
     toNaturalPoint(event, overlayRef.current, scale, naturalWidth, naturalHeight);
 
-  const startMove = (event: PointerEvent<HTMLDivElement>) => {
+  const startMove = (event: PointerEvent<Element>) => {
     if (!isMainPointer(event)) {
       return;
     }
@@ -397,12 +589,13 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
     beginPointerCapture(overlayRef.current, event.pointerId);
   };
 
-  const startResize = (edge: ResizeEdge) => (event: PointerEvent<HTMLDivElement>) => {
+  const startResize = (edge: ResizeEdge) => (event: PointerEvent<Element>) => {
     if (!isMainPointer(event)) {
       return;
     }
 
     event.preventDefault();
+    event.stopPropagation();
     const point = toPoint(event);
     const nextDragState: CropDragState = {
       kind: "resize",
@@ -410,7 +603,7 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
       edge,
       startCrop: draft
     };
-    setDraft(updateDraftForDragState(nextDragState, point, naturalWidth, naturalHeight, frameRatio));
+    setDraft(updateDraftForDragState(nextDragState, point, naturalWidth, naturalHeight, frameRatio, visibleCropZoom));
     setDragState(nextDragState);
     beginPointerCapture(overlayRef.current, event.pointerId);
   };
@@ -422,7 +615,7 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
 
     event.preventDefault();
     const point = toPoint(event);
-    setDraft(updateDraftForDragState(dragState, point, naturalWidth, naturalHeight, frameRatio));
+    setDraft(updateDraftForDragState(dragState, point, naturalWidth, naturalHeight, frameRatio, visibleCropZoom));
   };
 
   const stopDrag = (pointerId: number) => {
@@ -442,7 +635,7 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
 
     event.preventDefault();
     const point = toPoint(event);
-    setDraft(updateDraftForDragState(dragState, point, naturalWidth, naturalHeight, frameRatio));
+    setDraft(updateDraftForDragState(dragState, point, naturalWidth, naturalHeight, frameRatio, visibleCropZoom));
     stopDrag(event.pointerId);
   };
 
@@ -454,19 +647,25 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
   };
 
   const applyCrop = () => {
+    const storedDraft = expandCropAroundCenter(draft, visibleCropZoom);
     setPanelCrop(panel.id, {
-      x: draft.x,
-      y: draft.y,
-      width: draft.width,
-      height: draft.height,
-      scale: panel.image?.crop?.scale ?? 1
+      x: storedDraft.x,
+      y: storedDraft.y,
+      width: storedDraft.width,
+      height: storedDraft.height,
+      scale: cropZoom
     });
     onClose();
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(2,8,14,0.82)] p-4 backdrop-blur-sm">
-      <div className="studio-surface w-full max-w-6xl p-4 md:p-5">
+      <div
+        className="absolute inset-0"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <div className="studio-surface relative w-full max-w-6xl p-4 md:p-5" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">Crop Editor</p>
@@ -478,8 +677,11 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
         </div>
 
         <p className="mt-2 text-xs text-[var(--text-secondary)]">
-          拖动框内可移动裁剪区域，拖动四条边可缩放。裁剪框比例固定为分镜比例 {frameRatioText}，原图会保留在本地。
+          蓝色主梯形表示分镜里真正能看到的图像区域；拖动内部可移动，拖动四条边上的控制点可缩放。形状会跟随当前分镜梯形，实际可见区域的比例固定为 {frameRatioText}。
         </p>
+        {storedPreviewStyle ? (
+          <p className="mt-1 text-xs text-[var(--text-secondary)]">当前图片缩放为 {cropZoom.toFixed(2)}x，外层虚线梯形表示为保留这块可见区域而实际保存的 crop 缓冲范围。</p>
+        ) : null}
 
         <div
           className="relative mx-auto mt-4 overflow-hidden rounded-xl border border-[var(--line-soft)] bg-slate-950 shadow-[0_16px_46px_rgba(2,6,23,0.55)]"
@@ -500,23 +702,87 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
             onPointerUp={onOverlayPointerUp}
             onPointerCancel={onOverlayPointerCancel}
           >
-            <div
-              className="absolute border-2 border-cyan-300 bg-cyan-400/20"
-              style={createScaledStyle(draft, scale)}
-              onPointerDown={startMove}
-            >
-              <CropEdgeHandle edge="left" onPointerDown={startResize("left")} />
-              <CropEdgeHandle edge="right" onPointerDown={startResize("right")} />
-              <CropEdgeHandle edge="top" onPointerDown={startResize("top")} />
-              <CropEdgeHandle edge="bottom" onPointerDown={startResize("bottom")} />
+            {storedPreviewStyle ? (
+              <div className="pointer-events-none absolute" style={storedPreviewStyle}>
+                <svg
+                  className="absolute inset-0 block h-full w-full overflow-visible"
+                  viewBox="0 0 100 100"
+                  preserveAspectRatio="none"
+                >
+                  <polygon
+                    points={cropShapePreview.svgPoints}
+                    fill="rgba(34, 211, 238, 0.08)"
+                    stroke="rgb(165 243 252)"
+                    strokeWidth="1.5"
+                    strokeDasharray="5 4"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </svg>
+              </div>
+            ) : null}
+            <div className="absolute" style={draftStyle}>
+              <svg
+                className="absolute inset-0 block h-full w-full overflow-visible"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+              >
+                <polygon
+                  points={cropShapePreview.svgPoints}
+                  fill="rgba(34, 211, 238, 0.10)"
+                  className="cursor-move"
+                  onPointerDown={startMove}
+                />
+                <polygon
+                  points={cropShapePreview.svgPoints}
+                  fill="none"
+                  stroke="rgb(103 232 249)"
+                  strokeWidth="1.8"
+                  vectorEffect="non-scaling-stroke"
+                />
+                {cropEdges.map((edge) => (
+                  <g key={edge.edge}>
+                    <line
+                      x1={edge.start.x * 100}
+                      y1={edge.start.y * 100}
+                      x2={edge.end.x * 100}
+                      y2={edge.end.y * 100}
+                      stroke="transparent"
+                      strokeWidth="14"
+                      vectorEffect="non-scaling-stroke"
+                      style={{ cursor: getHandleCursor(edge.edge) }}
+                      onPointerDown={startResize(edge.edge)}
+                    />
+                  </g>
+                ))}
+              </svg>
+              {cropEdges.map((edge) => (
+                <div
+                  key={`${edge.edge}-handle`}
+                  className="absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-100 bg-cyan-400 shadow-[0_0_0_1px_rgba(34,211,238,0.35)]"
+                  style={{
+                    left: `${edge.mid.x * 100}%`,
+                    top: `${edge.mid.y * 100}%`,
+                    cursor: getHandleCursor(edge.edge)
+                  }}
+                  onPointerDown={startResize(edge.edge)}
+                />
+              ))}
             </div>
           </div>
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-[var(--text-primary)]">
           <span>
-            X: {Math.round(draft.x)} Y: {Math.round(draft.y)} W: {Math.round(draft.width)} H: {Math.round(draft.height)}
+            可见: X {Math.round(draft.x)} Y {Math.round(draft.y)} W {Math.round(draft.width)} H {Math.round(draft.height)}
           </span>
+          {storedPreview ? (
+            <>
+              <span className="text-[var(--text-secondary)]">|</span>
+              <span>
+                保存: X {Math.round(storedPreview.x)} Y {Math.round(storedPreview.y)} W {Math.round(storedPreview.width)} H {Math.round(storedPreview.height)}
+              </span>
+            </>
+          ) : null}
           <span className="text-[var(--text-secondary)]">|</span>
           <span>
             原图: {naturalWidth} x {naturalHeight}
@@ -529,7 +795,7 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
           </button>
           <button
             className={buttonClass}
-            onClick={() => setDraft(createCenteredCropWithRatio(naturalWidth, naturalHeight, frameRatio))}
+            onClick={() => setDraft(createCenteredVisibleCropWithRatio(naturalWidth, naturalHeight, frameRatio, visibleCropZoom))}
           >
             匹配比例最大区域
           </button>
@@ -547,7 +813,8 @@ function VisualCropModal({ panel, open, onClose }: { panel: Panel; open: boolean
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -617,6 +884,8 @@ function PanelInspector({ panel }: { panel: Panel }) {
 
   const [cropModalOpen, setCropModalOpen] = useState(false);
   const localImageInputRef = useRef<HTMLInputElement | null>(null);
+  const panelRotation = normalizePanelRotation(panel.rotation);
+  const panelShape = normalizePanelShape(panel.shape, panel.width);
 
   useEffect(() => {
     setCropModalOpen(false);
@@ -638,6 +907,30 @@ function PanelInspector({ panel }: { panel: Panel }) {
     event.target.value = "";
   };
 
+  const adjustRotation = (delta: number) => {
+    updatePanel(panel.id, {
+      rotation: normalizePanelRotation(panelRotation + delta)
+    });
+  };
+
+  const updateShape = (patchShape: Partial<PanelShape>) => {
+    updatePanel(panel.id, {
+      shape: normalizePanelShape(
+        {
+          ...panelShape,
+          ...patchShape
+        },
+        panel.width
+      )
+    });
+  };
+
+  const applyShapePreset = (shape: PanelShape) => {
+    updatePanel(panel.id, {
+      shape: normalizePanelShape(shape, panel.width)
+    });
+  };
+
   return (
     <div className="space-y-3">
       <div className={sectionClass}>
@@ -649,9 +942,44 @@ function PanelInspector({ panel }: { panel: Panel }) {
         <NumberField label="Y" value={panel.y} onChange={patch("y") as (v: number) => void} />
         <NumberField label="Width" value={panel.width} min={24} onChange={patch("width") as (v: number) => void} />
         <NumberField label="Height" value={panel.height} min={24} onChange={patch("height") as (v: number) => void} />
+        <NumberField
+          label="Tilt"
+          value={panelRotation}
+          min={-180}
+          max={180}
+          onChange={(value) => patch("rotation")(normalizePanelRotation(value))}
+        />
         <NumberField label="BorderWidth" value={panel.borderWidth} min={0} onChange={patch("borderWidth") as (v: number) => void} />
         <NumberField label="Radius" value={panel.borderRadius} min={0} onChange={patch("borderRadius") as (v: number) => void} />
         <NumberField label="Gap" value={panel.gap} min={0} onChange={patch("gap") as (v: number) => void} />
+
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            <button className={buttonClass} onClick={() => adjustRotation(-10)}>
+              -10°
+            </button>
+            <button className={buttonClass} onClick={() => adjustRotation(-5)}>
+              -5°
+            </button>
+            <button
+              className={buttonClass}
+              onClick={() => {
+                updatePanel(panel.id, {
+                  rotation: 0
+                });
+              }}
+            >
+              归零
+            </button>
+            <button className={buttonClass} onClick={() => adjustRotation(5)}>
+              +5°
+            </button>
+            <button className={buttonClass} onClick={() => adjustRotation(10)}>
+              +10°
+            </button>
+          </div>
+          <p className="text-xs text-[var(--text-secondary)]">画布上也可以直接拖动蓝色旋转手柄，角度会按 5° 吸附。</p>
+        </div>
 
         <label className={fieldClass}>
           <span className={labelClass}>BorderColor</span>
@@ -662,6 +990,39 @@ function PanelInspector({ panel }: { panel: Panel }) {
             onChange={(event) => patch("borderColor")(event.target.value)}
           />
         </label>
+      </div>
+
+      <div className={sectionClass}>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">斜切</h3>
+          <span className="studio-chip px-2.5 py-1 text-[11px]">Skew</span>
+        </div>
+
+        <p className="text-xs text-[var(--text-secondary)]">
+          最推荐的编辑方式是直接在画布拖动四个蓝色角点；这里更适合精修百分比或一键套用常见构图。
+        </p>
+        <p className="text-xs text-[var(--text-secondary)]">支持负值和超过 100% 的数值，这样就能把边角向外扩出去。</p>
+
+        <ShapePercentField label="Top Left" value={panelShape.topLeft} onChange={(value) => updateShape({ topLeft: value })} />
+        <ShapePercentField label="Top Right" value={panelShape.topRight} onChange={(value) => updateShape({ topRight: value })} />
+        <ShapePercentField
+          label="Bottom Right"
+          value={panelShape.bottomRight}
+          onChange={(value) => updateShape({ bottomRight: value })}
+        />
+        <ShapePercentField
+          label="Bottom Left"
+          value={panelShape.bottomLeft}
+          onChange={(value) => updateShape({ bottomLeft: value })}
+        />
+
+        <div className="flex flex-wrap gap-2">
+          {PANEL_SHAPE_PRESETS.map((preset) => (
+            <button key={preset.label} className={buttonClass} onClick={() => applyShapePreset(preset.shape)}>
+              {preset.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className={sectionClass}>
