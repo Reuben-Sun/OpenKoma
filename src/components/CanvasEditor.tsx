@@ -192,13 +192,11 @@ function PanelSkewHandles({
   const createBoundFunc =
     (key: PanelShapeKey) =>
     function dragBoundFunc(this: Konva.Node, position: Konva.Vector2d) {
-      const parent = this.getParent();
-      if (!parent) {
+      const localPoint = getLocalPointer(this);
+      if (!localPoint) {
         return position;
       }
 
-      const inverse = parent.getAbsoluteTransform().copy().invert();
-      const localPoint = inverse.point(position);
       const nextShape = updatePanelShapeHandle(shape, key, panel.width, localPoint.x);
       const nextLocalPoint = getPanelShapeHandlePoint({ width: panel.width, height: panel.height, shape: nextShape }, key);
 
@@ -208,13 +206,11 @@ function PanelSkewHandles({
   const createEdgeBoundFunc =
     (key: PanelEdgeKey) =>
     function dragBoundFunc(this: Konva.Node, position: Konva.Vector2d) {
-      const parent = this.getParent();
-      if (!parent) {
+      const localPoint = getLocalPointer(this);
+      if (!localPoint) {
         return position;
       }
 
-      const inverse = parent.getAbsoluteTransform().copy().invert();
-      const localPoint = inverse.point(position);
       const nextPanel = updatePanelEdgeHandle(panel, key, localPoint);
       const nextLocalPoint = getPanelEdgeHandlePoint(nextPanel, key);
 
@@ -307,14 +303,22 @@ function PanelSkewHandles({
             }}
             onDragMove={(event) => {
               event.cancelBubble = true;
+              const localPointer = getLocalPointer(event.target);
+              if (!localPointer) {
+                return;
+              }
               onDraftChange({
-                shape: updatePanelShapeHandle(shape, key, panel.width, event.target.x())
+                shape: updatePanelShapeHandle(shape, key, panel.width, localPointer.x)
               });
             }}
             onDragEnd={(event) => {
               event.cancelBubble = true;
+              const localPointer = getLocalPointer(event.target);
+              if (!localPointer) {
+                return;
+              }
               onCommit({
-                shape: updatePanelShapeHandle(shape, key, panel.width, event.target.x())
+                shape: updatePanelShapeHandle(shape, key, panel.width, localPointer.x)
               });
             }}
           />
