@@ -1,5 +1,6 @@
 import { CSSProperties, ChangeEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { normalizeHexColor } from "../lib/colors";
 import { Bubble, BubbleDirection, BubbleType, CropConfig, Panel, PanelShape } from "../types";
 import { shouldPreserveImageTransparency } from "../lib/imageFormat";
 import {
@@ -37,6 +38,8 @@ const buttonClass = "studio-btn px-3 py-1.5 text-sm";
 const primaryButtonClass = `${buttonClass} studio-btn-primary`;
 const dangerButtonClass = `${buttonClass} studio-btn-danger`;
 const colorInputClass = "h-9 w-20 cursor-pointer rounded-lg border border-[var(--line-soft)] bg-transparent";
+const colorSwatchClass =
+  "flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--line-soft)] shadow-[0_8px_18px_rgba(2,6,23,0.14)] transition hover:-translate-y-0.5";
 const cropOverlaySvgClass = "absolute inset-0 block h-full w-full overflow-visible";
 const cropHandleClass =
   "absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-100 bg-cyan-400 shadow-[0_0_0_1px_rgba(34,211,238,0.35)]";
@@ -404,6 +407,10 @@ function TextField({ label, value, onChange }: { label: string; value: string; o
 
 function getToggleButtonClass(active: boolean) {
   return `${buttonClass} ${active ? "studio-btn-primary" : ""}`;
+}
+
+function getColorSwatchButtonClass(active: boolean) {
+  return `${colorSwatchClass} ${active ? "border-cyan-300 shadow-[0_0_0_2px_rgba(34,211,238,0.3)]" : ""}`;
 }
 
 function isTransparentBubbleBackground(value: string) {
@@ -929,6 +936,8 @@ function PanelInspector({ panel }: { panel: Panel }) {
 
 function BubbleInspector({ bubble }: { bubble: Bubble }) {
   const updateBubble = useEditorStore((state) => state.updateBubble);
+  const recentTextColors = useEditorStore((state) => state.recentTextColors);
+  const currentTextColor = normalizeHexColor(bubble.textColor);
 
   const patch = (next: Partial<Bubble>) => {
     updateBubble(bubble.id, next);
@@ -1018,6 +1027,49 @@ function BubbleInspector({ bubble }: { bubble: Bubble }) {
 
         <NumberField label="字体大小" value={bubble.fontSize} min={8} onChange={(value) => patch({ fontSize: value })} />
         <TextField label="字体" value={bubble.fontFamily} onChange={(value) => patch({ fontFamily: value })} />
+
+        <div className="space-y-2">
+          <label className={fieldClass}>
+            <span className={labelClass}>字体颜色</span>
+            <div className="flex items-center gap-2">
+              <input
+                className={colorInputClass}
+                type="color"
+                value={currentTextColor}
+                onChange={(event) => patch({ textColor: event.target.value })}
+              />
+              <span className="min-w-20 text-right text-xs font-medium tracking-[0.08em] text-[var(--text-secondary)]">
+                {currentTextColor.toUpperCase()}
+              </span>
+            </div>
+          </label>
+
+          <div className="space-y-1">
+            <div className="flex items-center justify-between gap-3">
+              <span className={labelClass}>最近使用</span>
+              <span className="text-[11px] text-[var(--text-secondary)]">最多保留 5 种</span>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {recentTextColors.map((color, index) => {
+                const active = color === currentTextColor;
+                return (
+                  <button
+                    key={`${color}-${index}`}
+                    type="button"
+                    className={getColorSwatchButtonClass(active)}
+                    style={{ backgroundColor: color }}
+                    title={color.toUpperCase()}
+                    aria-label={`使用颜色 ${color.toUpperCase()}`}
+                    onClick={() => patch({ textColor: color })}
+                  >
+                    {active ? <span className="h-2.5 w-2.5 rounded-full bg-white shadow-[0_0_0_1px_rgba(15,23,42,0.35)]" /> : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className={sectionClass}>

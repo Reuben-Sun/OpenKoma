@@ -182,7 +182,7 @@ function PageMiniPreview({ page }: { page: ProjectPage }) {
                 verticalAlign="middle"
                 fontSize={bubble.fontSize}
                 fontFamily={bubble.fontFamily}
-                fill="#0f172a"
+                fill={bubble.textColor}
                 lineHeight={1.2}
                 listening={false}
               />

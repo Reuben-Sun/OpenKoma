@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { Bubble, BubbleType, CanvasConfig, CanvasPreset, Panel, Project, ProjectPage } from "../types";
+import { DEFAULT_BUBBLE_TEXT_COLOR, normalizeHexColor } from "./colors";
 import { normalizePanelRotation, normalizePanelShape, RECT_PANEL_SHAPE } from "./panelGeometry";
 
 export const CANVAS_PRESETS: Record<CanvasPreset, { width: number; height: number; dpi: number }> = {
@@ -82,6 +83,7 @@ export function createBubble(type: BubbleType = "rect", input: Partial<Bubble> =
     direction: input.direction === "vertical" ? "vertical" : "horizontal",
     fontSize: Math.max(8, safeFontSize),
     fontFamily: input.fontFamily ?? "Noto Sans SC",
+    textColor: normalizeHexColor(input.textColor, DEFAULT_BUBBLE_TEXT_COLOR),
     background: input.background ?? "#ffffff",
     borderColor: input.borderColor ?? "#111827",
     borderWidth: Math.max(0, safeBorderWidth)

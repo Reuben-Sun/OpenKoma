@@ -2,6 +2,13 @@ import { create } from "zustand";
 import { v4 as uuidv4 } from "uuid";
 import { applyPatch, compare, type Operation } from "fast-json-patch";
 import { uploadLocalImage } from "./api";
+import {
+  DEFAULT_BUBBLE_TEXT_COLOR,
+  mergeRecentHexColors,
+  normalizeHexColor,
+  pushRecentHexColor,
+  sanitizeRecentHexColors
+} from "./colors";
 import { shouldPreserveImageTransparency } from "./imageFormat";
 import {
   clamp,
@@ -38,6 +45,7 @@ type EditorStore = {
   assetRefMap: Record<string, string>;
   transientObjectUrls: string[];
   themeMode: ThemeMode;
+  recentTextColors: string[];
   selection?: Selection;
   manualPanelMode: boolean;
   snapSizeTo16: boolean;
@@ -174,13 +182,14 @@ type PersistedHistoryLogDocument = {
 const HISTORY_LIMIT = 80;
 const NOTICE_HISTORY_LIMIT = 300;
 const PROJECT_FILE_FORMAT = "openkoma-project";
-const PROJECT_FILE_VERSION = 5;
+const PROJECT_FILE_VERSION = 6;
 const HISTORY_LOG_FORMAT = "openkoma-history-log";
 const HISTORY_LOG_VERSION = 1;
 const PROJECT_JSON_FILENAME = "project.json";
 const HISTORY_LOG_FILENAME = "history.log";
 const PROJECT_JSON_EXPORT_SUFFIX = ".openkoma.json";
 const THEME_STORAGE_KEY = "openkoma-theme-mode";
+const RECENT_TEXT_COLORS_STORAGE_KEY = "openkoma-recent-text-colors";
 
 type ProjectDirectoryPickerWindow = Window & {
   showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle>;
@@ -248,6 +257,45 @@ function persistThemeMode(mode: ThemeMode) {
   } catch {
     // ignored
   }
+}
+
+function getInitialRecentTextColors(): string[] {
+  if (typeof window === "undefined") {
+    return [DEFAULT_BUBBLE_TEXT_COLOR];
+  }
+
+  try {
+    const stored = window.localStorage.getItem(RECENT_TEXT_COLORS_STORAGE_KEY);
+    if (!stored) {
+      return [DEFAULT_BUBBLE_TEXT_COLOR];
+    }
+
+    const parsed = JSON.parse(stored) as unknown;
+    const normalized = sanitizeRecentHexColors(parsed);
+    return normalized.length > 0 ? normalized : [DEFAULT_BUBBLE_TEXT_COLOR];
+  } catch {
+    return [DEFAULT_BUBBLE_TEXT_COLOR];
+  }
+}
+
+function persistRecentTextColors(colors: string[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(RECENT_TEXT_COLORS_STORAGE_KEY, JSON.stringify(sanitizeRecentHexColors(colors)));
+  } catch {
+    // ignored
+  }
+}
+
+function areColorListsEqual(left: string[], right: string[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((color, index) => color === right[index]);
 }
 
 async function pickProjectDirectory(): Promise<FileSystemDirectoryHandle | null> {
@@ -1142,6 +1190,7 @@ function describeBubblePatch(patch: Partial<Bubble>): string {
     "direction" in patch ||
     "fontSize" in patch ||
     "fontFamily" in patch ||
+    "textColor" in patch ||
     "background" in patch ||
     "borderColor" in patch ||
     "borderWidth" in patch
@@ -1235,6 +1284,7 @@ function sanitizeBubble(bubble: Partial<Bubble> | undefined): Bubble {
     direction: bubble?.direction === "vertical" ? "vertical" : "horizontal",
     fontSize: Number.isFinite(bubble?.fontSize) ? bubble?.fontSize : undefined,
     fontFamily: typeof bubble?.fontFamily === "string" && bubble.fontFamily.trim() ? bubble.fontFamily : undefined,
+    textColor: normalizeHexColor(bubble?.textColor, DEFAULT_BUBBLE_TEXT_COLOR),
     background: typeof bubble?.background === "string" && bubble.background.trim() ? bubble.background : undefined,
     borderColor: typeof bubble?.borderColor === "string" && bubble.borderColor.trim() ? bubble.borderColor : undefined,
     borderWidth: Number.isFinite(bubble?.borderWidth) ? bubble?.borderWidth : undefined
@@ -1311,6 +1361,14 @@ function normalizeLoadedProject(loaded: LegacyProject): Project {
     pages: [fallbackPage],
     activePageId: fallbackPage.id
   };
+}
+
+function collectProjectTextColors(project: Project): string[] {
+  const bubbleColors = project.pages
+    .flatMap((page) => page.bubbles)
+    .map((bubble) => bubble.textColor);
+
+  return mergeRecentHexColors(bubbleColors, [DEFAULT_BUBBLE_TEXT_COLOR]);
 }
 
 function getActivePageIndex(project: Project): number {
@@ -1676,6 +1734,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   assetRefMap: {},
   transientObjectUrls: [],
   themeMode: getInitialThemeMode(),
+  recentTextColors: getInitialRecentTextColors(),
   selection: undefined,
   manualPanelMode: false,
   snapSizeTo16: false,
@@ -2230,12 +2289,17 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         return state;
       }
 
+      let rememberedTextColor: string | undefined;
       const nextProject = updateActivePage(state.project, (page) => ({
         ...page,
         bubbles: page.bubbles.map((bubble) => {
           if (bubble.id !== id) {
             return bubble;
           }
+
+          const nextTextColor =
+            patch.textColor === undefined ? bubble.textColor : normalizeHexColor(patch.textColor, bubble.textColor);
+          rememberedTextColor = nextTextColor;
 
           return {
             ...bubble,
@@ -2245,18 +2309,36 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
             width: patch.width === undefined ? bubble.width : Math.max(30, patch.width),
             height: patch.height === undefined ? bubble.height : Math.max(30, patch.height),
             fontSize: patch.fontSize === undefined ? bubble.fontSize : Math.max(8, patch.fontSize),
+            textColor: nextTextColor,
             borderWidth: patch.borderWidth === undefined ? bubble.borderWidth : Math.max(0, patch.borderWidth)
           };
         })
       }));
 
+      const nextRecentTextColors =
+        rememberedTextColor === undefined
+          ? state.recentTextColors
+          : pushRecentHexColor(state.recentTextColors, rememberedTextColor);
+      const recentTextColorsChanged = !areColorListsEqual(nextRecentTextColors, state.recentTextColors);
       const historyState = withHistory(state, nextProject, describeBubblePatch(patch));
       if (!historyState) {
-        return state;
+        if (!recentTextColorsChanged) {
+          return state;
+        }
+
+        persistRecentTextColors(nextRecentTextColors);
+        return {
+          recentTextColors: nextRecentTextColors
+        };
+      }
+
+      if (recentTextColorsChanged) {
+        persistRecentTextColors(nextRecentTextColors);
       }
 
       return {
-        ...historyState
+        ...historyState,
+        recentTextColors: nextRecentTextColors
       };
     });
   },
@@ -2490,6 +2572,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
             : "项目加载完成：旧版项目不包含可恢复的编辑记忆";
 
         const nextNoticeHistory = appendNoticeToHistory(normalized.noticeHistory, loadNotice);
+        const nextRecentTextColors = mergeRecentHexColors(collectProjectTextColors(normalized.project), get().recentTextColors);
+        persistRecentTextColors(nextRecentTextColors);
 
         set({
           project: {
@@ -2498,6 +2582,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
           },
           historyPast: normalized.historyPast,
           historyFuture: normalized.historyFuture,
+          recentTextColors: nextRecentTextColors,
           noticeHistory: nextNoticeHistory,
           selection: undefined,
           notice: loadNotice,
@@ -2536,6 +2621,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
           : baseNotice;
 
       const nextNoticeHistory = appendNoticeToHistory(normalized.noticeHistory, loadNotice);
+      const nextRecentTextColors = mergeRecentHexColors(collectProjectTextColors(materialized.project), get().recentTextColors);
+      persistRecentTextColors(nextRecentTextColors);
 
       set({
         project: {
@@ -2544,6 +2631,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         },
         historyPast: materialized.historyPast,
         historyFuture: materialized.historyFuture,
+        recentTextColors: nextRecentTextColors,
         noticeHistory: nextNoticeHistory,
         selection: undefined,
         notice: loadNotice,

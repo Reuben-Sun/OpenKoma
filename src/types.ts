@@ -62,6 +62,7 @@ export type Bubble = {
   direction: BubbleDirection;
   fontSize: number;
   fontFamily: string;
+  textColor: string;
   background: string;
   borderColor: string;
   borderWidth: number;
