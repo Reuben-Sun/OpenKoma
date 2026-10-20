@@ -36,16 +36,6 @@ export type CanvasEditorHandle = {
 };
 
 const ROTATION_SNAP_ANGLES = Array.from({ length: 72 }, (_value, index) => index * 5);
-const ALL_TRANSFORMER_ANCHORS: string[] = [
-  "top-left",
-  "top-center",
-  "top-right",
-  "middle-left",
-  "middle-right",
-  "bottom-left",
-  "bottom-center",
-  "bottom-right"
-];
 const BUBBLE_TRANSFORMER_ANCHORS: string[] = ["top-center", "middle-left", "middle-right", "bottom-center"];
 
 function formatFilename(projectName: string, ext: "png" | "pdf") {
@@ -438,25 +428,36 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
     (selection?.kind !== "panel" || !selectedPanel || Math.abs(normalizePanelRotation(selectedPanel.rotation)) < 0.001);
   const styleTransformerAnchor = (anchor: Konva.Rect) => {
     if (selection?.kind !== "panel") {
+      // Konva update() resets anchor size and visibility but not listening.
+      // Restore it explicitly when switching from a panel back to a bubble.
+      anchor.setAttrs({
+        listening: true,
+        width: TRANSFORMER_ANCHOR_SIZE,
+        height: TRANSFORMER_ANCHOR_SIZE
+      });
       return;
     }
 
     if (!anchor.hasName("rotater")) {
-      anchor.visible(false);
-      anchor.listening(false);
-      anchor.width(0);
-      anchor.height(0);
+      anchor.setAttrs({
+        visible: false,
+        listening: false,
+        width: 0,
+        height: 0
+      });
       return;
     }
 
-    anchor.visible(true);
-    anchor.listening(true);
-    anchor.width(TRANSFORMER_ANCHOR_SIZE);
-    anchor.height(TRANSFORMER_ANCHOR_SIZE);
-    anchor.cornerRadius(TRANSFORMER_ANCHOR_SIZE / 2);
-    anchor.fill("#eff6ff");
-    anchor.stroke(SKEW_HANDLE_COLOR);
-    anchor.strokeWidth(2);
+    anchor.setAttrs({
+      visible: true,
+      listening: true,
+      width: TRANSFORMER_ANCHOR_SIZE,
+      height: TRANSFORMER_ANCHOR_SIZE,
+      cornerRadius: TRANSFORMER_ANCHOR_SIZE / 2,
+      fill: "#eff6ff",
+      stroke: SKEW_HANDLE_COLOR,
+      strokeWidth: 2
+    });
   };
 
   useEffect(() => {
@@ -489,29 +490,6 @@ const CanvasEditor = forwardRef<CanvasEditorHandle>(function CanvasEditor(_props
     transformerRef.current.nodes([node]);
     transformerRef.current.getLayer()?.batchDraw();
   }, [selectedNodeId, activePage.id, activePage.panels, activePage.bubbles]);
-
-  useEffect(() => {
-    const transformer = transformerRef.current;
-    if (!transformer || selection?.kind !== "panel") {
-      return;
-    }
-
-    ALL_TRANSFORMER_ANCHORS.forEach((anchorName) => {
-      const anchor = transformer.findOne<Konva.Rect>(`.${anchorName}`);
-      if (!anchor) {
-        return;
-      }
-
-      anchor.setAttrs({
-        visible: false,
-        listening: false,
-        width: 0,
-        height: 0
-      });
-    });
-
-    transformer.getLayer()?.batchDraw();
-  }, [selection?.kind, selectedNodeId, activePage.id, activePage.panels, activePage.bubbles]);
 
   const captureStageDataUrl = async (exportWidth: number, exportHeight: number) => {
     const stage = stageRef.current;
